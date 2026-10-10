@@ -3,6 +3,7 @@ import type { Db } from "@basal/db";
 import { decisionRequest, decisionUsage } from "@basal/shared";
 import { type Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
+import { secureHeaders } from "hono/secure-headers";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import type { Redis } from "ioredis";
 import { z } from "zod";
@@ -73,6 +74,9 @@ const upstreamResponse = z.looseObject({ answers: z.record(z.string(), z.unknown
 
 export function createApp({ db, redis, upstreams, userLimits, defaultModel, hooks = {} }: Deps) {
   const app = new Hono();
+
+  // JSON API: no framing, no MIME sniffing, no referrer; HSTS is ignored by browsers on plain HTTP
+  app.use("*", secureHeaders({ crossOriginResourcePolicy: false }));
 
   app.get("/health", (c) => c.json({ status: "ok" }));
 
