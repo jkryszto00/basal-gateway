@@ -13,7 +13,8 @@
     "test": "turbo run test",
     "db:up": "docker compose up -d postgres redis",
     "db:generate": "bun --filter @basal/db generate",
-    "db:migrate": "bun --filter @basal/db migrate"
+    "db:migrate": "bun --filter @basal/db migrate",
+    "admin": "bun run --cwd apps/cli admin"
   },
   "devDependencies": {
     "turbo": "^2.11.7",

@@ -9,6 +9,19 @@
         "typescript": "^5",
       },
     },
+    "apps/cli": {
+      "name": "@basal/cli",
+      "dependencies": {
+        "@basal/db": "workspace:*",
+        "@basal/shared": "workspace:*",
+        "better-auth": "^1.7.7",
+        "ioredis": "^6.0.0",
+      },
+      "devDependencies": {
+        "@types/bun": "^1.3.14",
+        "typescript": "^5",
+      },
+    },
     "apps/gateway": {
       "name": "@basal/gateway",
       "dependencies": {
@@ -108,6 +121,8 @@
     "@babel/traverse": ["@babel/traverse@7.29.10", "", { "dependencies": { "@babel/code-frame": "^7.29.7", "@babel/generator": "^7.29.8", "@babel/helper-globals": "^7.29.7", "@babel/parser": "^7.29.9", "@babel/template": "^7.29.7", "@babel/types": "^7.29.8", "debug": "^4.3.1" } }, "sha512-B3lYAs2nkKskbgQ1nfy8Ma9ao9Q1rntTAQHrzzyDuj+TSO+X3le6PfWwqDvodsb+OumE10eMFfuMCTQSQ5iuIQ=="],
 
     "@babel/types": ["@babel/types@7.29.8", "", { "dependencies": { "@babel/helper-string-parser": "^7.29.7", "@babel/helper-validator-identifier": "^7.29.7" } }, "sha512-Vj1jF3cPfxg7OAfoI7QnVKLoILlm2JF9pnVHrX8qx7AHMiYWT+NDAA7jChlNgRS4WTLc/fD1lXLmPixluj+3Gg=="],
+
+    "@basal/cli": ["@basal/cli@workspace:apps/cli"],
 
     "@basal/db": ["@basal/db@workspace:packages/db"],
 
