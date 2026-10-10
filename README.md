@@ -31,6 +31,8 @@ web (Next.js) ── sign up, API keys, usage, balance, settings
   GitHub and Google sign in, open or closed sign up and allowed email domains, breached-password check (Have I Been
   Pwned), optional Cloudflare Turnstile, rate-limited sign in, sign up and resets, password change and account
   deletion.
+- **Hardened defaults**: Content Security Policy and anti-framing headers on the dashboard (HSTS when served over
+  HTTPS), secure headers on the API, Better Auth's HTTP endpoints limited to the emailed links and OAuth callbacks.
 - **Several models**: each public model name maps to an inference server (`UPSTREAMS`), clients
   pick one with `"model"`, and the dashboard lists them and breaks usage down per model.
 
