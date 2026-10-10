@@ -9,7 +9,7 @@ import { haveIBeenPwned } from "better-auth/plugins";
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { db } from "./db";
-import { resetPasswordEmail, trySendEmail, verificationEmail } from "./email";
+import { EMAIL_VERIFICATION, resetPasswordEmail, trySendEmail, verificationEmail } from "./email";
 import { PASSWORD } from "./password";
 import { redis } from "./redis";
 import { SIGNUP_OPEN, signupAllowed } from "./signup";
@@ -23,7 +23,7 @@ const socialProviders = {
       github: {
         clientId: env.GITHUB_CLIENT_ID,
         clientSecret: env.GITHUB_CLIENT_SECRET,
-        requireEmailVerification: true,
+        requireEmailVerification: EMAIL_VERIFICATION,
         disableSignUp: !SIGNUP_OPEN, // existing accounts can still sign in
       },
     }),
@@ -33,7 +33,7 @@ const socialProviders = {
         clientId: env.GOOGLE_CLIENT_ID,
         clientSecret: env.GOOGLE_CLIENT_SECRET,
         prompt: "select_account" as const,
-        requireEmailVerification: true,
+        requireEmailVerification: EMAIL_VERIFICATION,
         disableSignUp: !SIGNUP_OPEN,
       },
     }),
@@ -51,14 +51,14 @@ export const auth = betterAuth({
     minPasswordLength: PASSWORD.min,
     maxPasswordLength: PASSWORD.max,
     // no session until the email is confirmed; sign up then answers the same for new and taken emails
-    requireEmailVerification: true,
+    requireEmailVerification: EMAIL_VERIFICATION,
     sendResetPassword: ({ user, url }) => trySendEmail(resetPasswordEmail(user.email, url)),
     resetPasswordTokenExpiresIn: 60 * 60,
     revokeSessionsOnPasswordReset: true,
   },
   emailVerification: {
-    sendOnSignUp: true,
-    sendOnSignIn: true, // a correct password on an unconfirmed account sends a fresh link
+    sendOnSignUp: EMAIL_VERIFICATION,
+    sendOnSignIn: EMAIL_VERIFICATION, // a correct password on an unconfirmed account sends a fresh link
     expiresIn: 24 * 60 * 60,
     autoSignInAfterVerification: true,
     sendVerificationEmail: ({ user, url }) => trySendEmail(verificationEmail(user.email, url)),

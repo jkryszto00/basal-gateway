@@ -19,7 +19,7 @@ export default async function Overview({ searchParams }: PageProps<"/dashboard">
 
       {welcome !== undefined && (
         <p role="status" className="rounded-md border border-accent/40 bg-accent/5 p-3 text-sm">
-          Your email is confirmed. Create an API key to send your first request.
+          Your account is ready. Create an API key to send your first request.
         </p>
       )}
 

@@ -86,7 +86,7 @@ step("signup with a taken email looks the same");
 
 await page.goto(verifyLink);
 await page.waitForURL(`${base}/dashboard?welcome=1`);
-if (!(await status()).includes("Your email is confirmed")) throw new Error("no welcome banner");
+if (!(await status()).includes("Your account is ready")) throw new Error("no welcome banner");
 step("confirmation link -> signed in");
 
 await page.click("text=API keys");

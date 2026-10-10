@@ -9,6 +9,7 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { isPasswordCompromised } from "better-auth/plugins";
 import { auth, OAUTH_PROVIDERS, type OAuthProvider, PASSWORD_COMPROMISED, requireUser } from "@/lib/auth";
+import { EMAIL_VERIFICATION } from "@/lib/email";
 import { clientIp } from "@/lib/client-ip";
 import { signInMethods } from "@/lib/data";
 import { db } from "@/lib/db";
@@ -64,10 +65,13 @@ export async function signUp(_: FormState, form: FormData): Promise<FormState> {
     // with requireEmailVerification Better Auth answers the same for a new and a taken email: no account enumeration
     await auth.api.signUpEmail({ body: { ...parsed.data, callbackURL: VERIFY_CALLBACK }, headers: await headers() });
   } catch (e) {
-    if (e instanceof APIError)
-      return { error: passwordProblem(e) ?? "We could not create the account. Try again in a moment.", values };
-    throw e;
+    if (!(e instanceof APIError)) throw e;
+    // only without email verification does Better Auth say the email is taken (nothing to hide then: no inbox check)
+    if (codeOf(e)?.startsWith("USER_ALREADY_EXISTS"))
+      return { error: "An account with this email already exists. Sign in instead.", values };
+    return { error: passwordProblem(e) ?? "We could not create the account. Try again in a moment.", values };
   }
+  if (!EMAIL_VERIFICATION) redirect("/dashboard?welcome=1"); // signed in right away
   return { sent: parsed.data.email };
 }
 

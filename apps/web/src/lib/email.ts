@@ -1,25 +1,49 @@
 import "server-only";
+import { createTransport, type Transporter } from "nodemailer";
 import { APP_NAME } from "./app-name";
 
-// Transactional email through Resend's HTTP API. Without RESEND_API_KEY the message is printed to the server log
-// instead, so sign up and password reset work locally without an email account.
+// Transactional email: SMTP when SMTP_URL is set (smtp://user:pass@host:587, smtps://… for TLS on 465), else
+// Resend's HTTP API with RESEND_API_KEY, else printed to the server log, so sign up and password reset work locally
+// without an email account.
+const SMTP_URL = process.env.SMTP_URL;
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
-const EMAIL_FROM = process.env.EMAIL_FROM ?? `${APP_NAME} <onboarding@resend.dev>`;
+const EMAIL_FROM = process.env.EMAIL_FROM ?? `${APP_NAME} <noreply@localhost>`;
+
+/**
+ * Accounts must confirm their email before signing in (default). EMAIL_VERIFICATION=false for installs that cannot
+ * send email, e.g. on an internal network: accounts work right after sign up.
+ */
+export const EMAIL_VERIFICATION = !["false", "0", "no", "off"].includes(
+  (process.env.EMAIL_VERIFICATION ?? "true").toLowerCase(),
+);
 
 type Email = { to: string; subject: string; text: string; html: string };
 
+let smtp: Transporter | undefined;
+
 export async function sendEmail(email: Email) {
-  if (!RESEND_API_KEY) {
-    console.info(`[email] to ${email.to}: ${email.subject}\n${email.text}`);
+  if (SMTP_URL) {
+    smtp ??= createTransport(SMTP_URL);
+    await smtp.sendMail({ from: EMAIL_FROM, ...email });
     return;
   }
-  const res = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: { authorization: `Bearer ${RESEND_API_KEY}`, "content-type": "application/json" },
-    body: JSON.stringify({ from: EMAIL_FROM, to: [email.to], subject: email.subject, text: email.text, html: email.html }),
-    signal: AbortSignal.timeout(10_000),
-  });
-  if (!res.ok) throw new Error(`resend ${res.status}: ${await res.text()}`);
+  if (RESEND_API_KEY) {
+    const res = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: { authorization: `Bearer ${RESEND_API_KEY}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        from: EMAIL_FROM,
+        to: [email.to],
+        subject: email.subject,
+        text: email.text,
+        html: email.html,
+      }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!res.ok) throw new Error(`resend ${res.status}: ${await res.text()}`);
+    return;
+  }
+  console.info(`[email] to ${email.to}: ${email.subject}\n${email.text}`);
 }
 
 /** Logs instead of throwing: a failed send must not fail the sign up, the user can ask for a new link. */

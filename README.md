@@ -27,9 +27,10 @@ web (Next.js) ── sign up, API keys, usage, balance, settings
 - **Usage**: every successful request is recorded (model, key, input tokens, questions, branches, latency) and shown
   per model and per request. Usage is measured in units, not money: what a decision costs depends on your hardware, so turn
   it into your own rates or internal charges; [hooks](#extending) let a build add pricing.
-- **Accounts**: email and password with confirmation links and password reset, optional GitHub and Google sign in,
-  breached-password check (Have I Been Pwned), optional Cloudflare Turnstile, rate-limited sign in, sign up and resets,
-  password change and account deletion.
+- **Accounts**: email and password with optional email confirmation and password reset (SMTP or Resend), optional
+  GitHub and Google sign in, open or closed sign up and allowed email domains, breached-password check (Have I Been
+  Pwned), optional Cloudflare Turnstile, rate-limited sign in, sign up and resets, password change and account
+  deletion.
 - **Several models**: basal 1.5 and 1.0; each public model name maps to an inference server (`UPSTREAMS`), clients
   pick one with `"model"`, and the dashboard lists them and breaks usage down per model.
 
@@ -158,7 +159,10 @@ All settings are environment variables, read from `.env` at the repository root 
 | `NEXT_PUBLIC_API_URL` | `http://localhost:8787` | gateway URL shown in the dashboard |
 | `GATEWAY_INTERNAL_URL` | `NEXT_PUBLIC_API_URL` | where the dashboard reaches the gateway for its model list |
 | `CLIENT_IP_HEADER` | `x-forwarded-for` | header with the visitor's IP (`cf-connecting-ip` behind Cloudflare); only trust it if the dashboard cannot be reached around your proxy |
-| `RESEND_API_KEY`, `EMAIL_FROM` | | email through Resend; without a key emails are printed to the log |
+| `SMTP_URL` | | email over SMTP: `smtp://user:pass@host:587` (STARTTLS) or `smtps://…:465` |
+| `RESEND_API_KEY` | | email through Resend when `SMTP_URL` is not set; without either, emails are printed to the log |
+| `EMAIL_FROM` | `<APP_NAME> <noreply@localhost>` | sender of confirmation and reset emails |
+| `EMAIL_VERIFICATION` | `true` | `false`: accounts work right after sign up, for installs that cannot send email |
 | `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` | | optional Cloudflare Turnstile on sign up |
 | `GITHUB_CLIENT_ID`/`_SECRET`, `GOOGLE_CLIENT_ID`/`_SECRET` | | optional OAuth sign in; callback `<BETTER_AUTH_URL>/api/auth/callback/<github\|google>` |
 
