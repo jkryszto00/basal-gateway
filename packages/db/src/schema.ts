@@ -70,7 +70,7 @@ export const apiKeys = pgTable(
     name: text("name").notNull(),
     /** sha256 of the full key; the key itself is never stored */
     hash: text("hash").notNull().unique(),
-    /** first characters, for display ("bp_live_abc123…") */
+    /** first characters, for display ("bg_live_abc123…") */
     prefix: text("prefix").notNull(),
     rpmLimit: integer("rpm_limit").notNull().default(60),
     concurrencyLimit: integer("concurrency_limit").notNull().default(8),

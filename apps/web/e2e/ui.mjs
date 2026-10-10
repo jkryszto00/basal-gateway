@@ -7,6 +7,7 @@ import { readFileSync } from "node:fs";
 import { chromium } from "playwright-core";
 
 const base = process.env.WEB_URL ?? "http://localhost:3000";
+const KEY_PREFIX = process.env.API_KEY_PREFIX ?? "bg_live_";
 const log = process.env.WEB_LOG;
 if (!log) throw new Error("set WEB_LOG to the app's log file (emails are printed there)");
 const browser = await chromium.launch({ channel: "chrome", headless: true });
@@ -92,11 +93,11 @@ await page.click("text=API keys");
 await page.waitForURL(`${base}/dashboard/keys`);
 await page.fill('input[name="name"]', "to-revoke");
 await page.click("text=Create key");
-await page.locator("code", { hasText: "bp_live_" }).waitFor();
+await page.locator("code", { hasText: KEY_PREFIX }).waitFor();
 await page.fill('input[name="name"]', "e2e");
 await page.click("text=Create key");
 await page.locator("strong", { hasText: "e2e" }).waitFor();
-const key = (await page.locator("code", { hasText: "bp_live_" }).textContent()).trim();
+const key = (await page.locator("code", { hasText: KEY_PREFIX }).textContent()).trim();
 step(`created keys, shown once: ${key.slice(0, 14)}…`);
 const rows = page.locator("tbody tr");
 if ((await rows.count()) !== 2) throw new Error(`expected 2 rows, got ${await rows.count()}`);
@@ -107,7 +108,7 @@ if ((await rows.count()) !== 1) throw new Error("revoke did not remove the row")
 step("revoked one key");
 
 await page.reload();
-if (await page.locator("code", { hasText: "bp_live_" }).count()) throw new Error("full key visible after reload");
+if (await page.locator("code", { hasText: KEY_PREFIX }).count()) throw new Error("full key visible after reload");
 step("full key not shown after reload");
 
 await signOut();
