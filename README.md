@@ -133,6 +133,13 @@ label of a `multi` question). A model without `pricing` uses the default list fo
 
 Any other name is free (usage is still recorded). `GET /v1/models` lists the models, the default and their prices.
 
+### basal 1.0
+
+basal-1.0 models (`Remek/basal-1.0-4.5B`, `Remek/basal-1.0-1.5B`) work the same way, served by basal-rs or a basal
+1.0 server. They answer `choice`, `noul` and `score` questions; `multi`, `act` and `facts` are basal-1.5 features
+that a 1.0 server rejects (422). A 1.0 server reports only token counts, so the gateway fills in `questions`,
+`branches` and `latency_ms` from the request and its own timing.
+
 ### basal-rs with Docker
 
 On a machine with an NVIDIA GPU and the [NVIDIA Container

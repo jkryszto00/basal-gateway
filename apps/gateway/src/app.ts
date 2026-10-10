@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { Db } from "@basal/db";
-import { costMicroUsd, decisionRequest, decisionUsage } from "@basal/shared";
+import { completeUsage, costMicroUsd, decisionRequest, serverUsage } from "@basal/shared";
 import { type Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
@@ -50,7 +50,7 @@ const fail = (code: ErrorCode, message: string, status: ContentfulStatusCode, de
 /** Rejected before parsing; a maximal valid request (32k-char state, 16 questions) is far below it. */
 export const MAX_BODY_BYTES = 256 * 1024;
 
-const upstreamResponse = z.looseObject({ answers: z.record(z.string(), z.unknown()), usage: decisionUsage });
+const upstreamResponse = z.looseObject({ answers: z.record(z.string(), z.unknown()), usage: serverUsage });
 
 export function createApp({ db, redis, upstreams, userLimits, requireCredits, defaultModel }: Deps) {
   const app = new Hono();
@@ -140,6 +140,7 @@ export function createApp({ db, redis, upstreams, userLimits, requireCredits, de
     try {
       if (!upstream.tryAcquire()) return fail("overloaded", "model is at capacity, retry shortly", 503);
       let result;
+      const sentAt = performance.now();
       try {
         result = await upstream.decide(body);
       } finally {
@@ -167,7 +168,8 @@ export function createApp({ db, redis, upstreams, userLimits, requireCredits, de
         return fail("upstream_error", "inference failed", 502);
       }
 
-      const usage = out.data.usage;
+      // basal-1.0 servers report only token counts: questions, branches and latency are filled in here
+      const usage = completeUsage(out.data.usage, body, performance.now() - sentAt);
       const cost = costMicroUsd(price, usage);
       const totalMs = performance.now() - t0;
       await charge(redis, {
