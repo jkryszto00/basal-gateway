@@ -38,6 +38,26 @@ web (Next.js) ── sign up, API keys, usage, balance, settings
 
 ## Quick start
 
+### With Docker
+
+Everything in containers: Postgres, Redis, the gateway (applies migrations on start), the dashboard, and an inference
+server.
+
+```bash
+git clone https://github.com/jkryszto00/basal-gateway.git && cd basal-gateway
+cp .env.example .env                          # set BETTER_AUTH_SECRET (openssl rand -hex 32)
+docker compose --profile mock up -d --build   # mock basal server: try it without a GPU (made-up answers)
+docker compose --profile gpu up -d --build    # or basal-rs on an NVIDIA GPU (NVIDIA Container Toolkit)
+docker compose logs -f web                    # confirmation links, when no email is configured
+```
+
+Dashboard on http://localhost:3000, API on http://localhost:8787. Both profiles point the gateway at their inference
+container; to use your own server instead, set `UPSTREAMS_DOCKER` in `.env` and start with `--profile app`. The images
+can also be built on their own (`apps/gateway/Dockerfile`, `apps/web/Dockerfile`, from the repository root); the
+dashboard image reads every setting at runtime.
+
+### For development
+
 Requirements: [Bun](https://bun.sh) 1.3+, Node.js 20+ (the dashboard runs on Next.js), Docker, and an inference
 server, or the mock server to try everything without a GPU.
 
@@ -173,8 +193,8 @@ All settings are environment variables, read from `.env` at the repository root 
 | `SIGNUP_MODE` | `open` | `closed`: no new accounts (create them with the admin CLI); existing ones still sign in |
 | `SIGNUP_ALLOWED_DOMAINS` | | e.g. `acme.com,acme.pl`: only these email domains may sign up (email and OAuth) |
 | `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL` | | session secret and the dashboard's public URL |
-| `NEXT_PUBLIC_API_URL` | `http://localhost:8787` | gateway URL shown in the dashboard |
-| `GATEWAY_INTERNAL_URL` | `NEXT_PUBLIC_API_URL` | where the dashboard reaches the gateway for its model list |
+| `GATEWAY_PUBLIC_URL` | `http://localhost:8787` | gateway URL shown in the dashboard |
+| `GATEWAY_INTERNAL_URL` | `GATEWAY_PUBLIC_URL` | where the dashboard reaches the gateway for its model list |
 | `CLIENT_IP_HEADER` | `x-forwarded-for` | header with the visitor's IP (`cf-connecting-ip` behind Cloudflare); only trust it if the dashboard cannot be reached around your proxy |
 | `SMTP_URL` | | email over SMTP: `smtp://user:pass@host:587` (STARTTLS) or `smtps://…:465` |
 | `RESEND_API_KEY` | | email through Resend when `SMTP_URL` is not set; without either, emails are printed to the log |

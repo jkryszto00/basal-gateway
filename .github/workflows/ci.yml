@@ -55,7 +55,7 @@ jobs:
       UPSTREAMS: '{"basal-1.5":{"url":"http://localhost:8000","path":"/v1/basal"}}'
       BETTER_AUTH_SECRET: ci-only-secret-0123456789abcdef0123456789abcdef
       BETTER_AUTH_URL: http://localhost:3000
-      NEXT_PUBLIC_API_URL: http://localhost:8787
+      GATEWAY_PUBLIC_URL: http://localhost:8787
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -80,3 +80,10 @@ jobs:
       - name: Logs
         if: failure()
         run: tail -n 100 /tmp/mock.log /tmp/gateway.log /tmp/web.log
+
+  docker:
+    name: Docker images
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker compose --profile mock build

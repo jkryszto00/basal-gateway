@@ -4,7 +4,7 @@ import { Card, Stat } from "@/components/ui";
 import { usageSummary } from "@/lib/data";
 import { listModels, type ModelInfo } from "@/lib/models";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8787";
+const API_URL = process.env.GATEWAY_PUBLIC_URL ?? "http://localhost:8787";
 
 export default async function Overview({ searchParams }: PageProps<"/dashboard">) {
   const [{ welcome }, usage, models] = await Promise.all([searchParams, usageSummary(30), listModels()]);
