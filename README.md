@@ -72,6 +72,21 @@ The response is basal's, plus a request `id`:
 ```
 
 
+## Administration
+
+`bun run admin` works on the database directly, whatever `SIGNUP_MODE` says, e.g. to create the first accounts of a
+closed instance:
+
+```bash
+bun run admin users                                   # accounts, active keys, last request
+bun run admin users add ana@acme.com --name Ana       # confirmed account; prints a generated password once
+bun run admin users verify ana@acme.com               # mark an email as confirmed
+bun run admin users delete ana@acme.com --yes         # with its keys and usage; keys stop working at once
+bun run admin keys ana@acme.com                       # an account's API keys
+bun run admin keys revoke <key-id>                    # revoke a key at once
+bun run admin usage --days 30 --csv                   # requests, decisions, branches, tokens per account and model
+```
+
 ## Inference servers
 
 The gateway forwards to anything that serves the basal API (`POST /v1/systemone`). Configure one entry per public
@@ -187,6 +202,7 @@ Only successful requests are recorded as usage.
 ```
 apps/gateway      Hono on Bun: /v1/systemone, /v1/basal, /v1/models, auth, limits, billing
 apps/web          Next.js: dashboard and accounts (Better Auth)
+apps/cli          admin CLI (bun run admin)
 packages/db       Drizzle schema and migrations
 packages/shared   request schema, usage, API key helpers
 inference/        basal-serve on Modal (Python, uv)
