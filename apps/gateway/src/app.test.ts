@@ -174,7 +174,7 @@ afterAll(async () => {
 describe("POST /v1/systemone", () => {
   it("rejects missing and unknown keys", async () => {
     expect((await post(null, body())).status).toBe(401);
-    expect((await post("bp_live_0000000000000000000000000000", body())).status).toBe(401);
+    expect((await post("bg_live_00000000000000000000000000000000", body())).status).toBe(401);
   });
 
   it("validates before touching the upstream", async () => {

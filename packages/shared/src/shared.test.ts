@@ -44,6 +44,13 @@ describe("api keys", () => {
     expect(key.startsWith(prefix)).toBe(true);
     expect(looksLikeApiKey("sk-other")).toBe(false);
   });
+
+  it("uses the configured prefix and still recognises keys made with another one", () => {
+    const { key } = generateApiKey("acme_");
+    expect(key.startsWith("acme_")).toBe(true);
+    expect(looksLikeApiKey(key)).toBe(true);
+    expect(generateApiKey().key.startsWith("bg_live_")).toBe(true);
+  });
 });
 
 describe("usage of basal-1.0 servers", () => {

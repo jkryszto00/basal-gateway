@@ -148,6 +148,7 @@ All settings are environment variables, read from `.env` at the repository root 
 | `UPSTREAMS` | | model name → inference server (JSON, see above) |
 | `DEFAULT_MODEL` | first in `UPSTREAMS` | model of requests without `"model"` |
 | `GATEWAY_PORT` | `8787` | |
+| `API_KEY_PREFIX` | `bg_live_` | start of new API keys; existing keys keep working after a change |
 | `USER_RPM_LIMIT`, `USER_CONCURRENCY_LIMIT` | `120`, `16` | per account over all its keys; each key also has its own limits (60/min, 8) |
 | `USER_DAILY_REQUESTS` | `0` | requests per UTC day per account, `0` = unlimited |
 | `APP_NAME` | `basal gateway` | shown in the dashboard and emails |
