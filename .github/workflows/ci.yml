@@ -1,0 +1,82 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DATABASE_URL: postgres://basal:basal@localhost:5432/basal
+  REDIS_URL: redis://localhost:6379
+  REDIS_TEST_URL: redis://localhost:6379/15
+
+jobs:
+  check:
+    name: Format, types, tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env: { POSTGRES_USER: basal, POSTGRES_PASSWORD: basal, POSTGRES_DB: basal }
+        ports: ["5432:5432"]
+        options: --health-cmd "pg_isready -U basal" --health-interval 2s --health-timeout 5s --health-retries 15
+      redis:
+        image: redis:8
+        ports: ["6379:6379"]
+        options: --health-cmd "redis-cli ping" --health-interval 2s --health-timeout 5s --health-retries 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with: { bun-version: 1.3.14 }
+      - run: bun install --frozen-lockfile
+      - run: bun run format:check
+      - run: bun run typecheck
+      - run: bun run db:migrate
+      - run: bun run test
+
+  e2e:
+    name: Browser smoke test
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env: { POSTGRES_USER: basal, POSTGRES_PASSWORD: basal, POSTGRES_DB: basal }
+        ports: ["5432:5432"]
+        options: --health-cmd "pg_isready -U basal" --health-interval 2s --health-timeout 5s --health-retries 15
+      redis:
+        image: redis:8
+        ports: ["6379:6379"]
+        options: --health-cmd "redis-cli ping" --health-interval 2s --health-timeout 5s --health-retries 15
+    env:
+      UPSTREAMS: '{"basal-1.5":{"url":"http://localhost:8000","path":"/v1/basal"}}'
+      BETTER_AUTH_SECRET: ci-only-secret-0123456789abcdef0123456789abcdef
+      BETTER_AUTH_URL: http://localhost:3000
+      NEXT_PUBLIC_API_URL: http://localhost:8787
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with: { bun-version: 1.3.14 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: bun install --frozen-lockfile
+      - run: bun run db:migrate
+      - run: bun run build
+      - name: Start mock server, gateway and dashboard
+        run: |
+          (cd apps/mock && bun src/index.ts > /tmp/mock.log 2>&1 &)
+          (cd apps/gateway && bun src/index.ts > /tmp/gateway.log 2>&1 &)
+          (cd apps/web && bun run start > /tmp/web.log 2>&1 &)
+          for i in $(seq 1 60); do
+            curl -sf localhost:3000/login > /dev/null && curl -sf localhost:8787/health > /dev/null && exit 0
+            sleep 1
+          done
+          echo "services did not start" && exit 1
+      - name: Smoke test (uses the runner's Google Chrome)
+        run: cd apps/web && WEB_LOG=/tmp/web.log GATEWAY_URL=http://localhost:8787 bun run e2e
+      - name: Logs
+        if: failure()
+        run: tail -n 100 /tmp/mock.log /tmp/gateway.log /tmp/web.log
