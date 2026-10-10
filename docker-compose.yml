@@ -1,3 +1,9 @@
+# Postgres and Redis for the gateway and the dashboard: `docker compose up -d postgres redis`.
+#
+# basal-rs (inference on an NVIDIA GPU, needs the NVIDIA Container Toolkit): `docker compose --profile gpu up -d`.
+# The first start downloads the model and generates its GEMM tables (minutes; `docker compose logs -f basal-rs`);
+# later starts reuse them from the basal-data volume. Then point the gateway at it:
+#   UPSTREAMS={"basal-1.5":{"url":"http://localhost:8000","path":"/v1/basal"}}
 services:
   postgres:
     image: postgres:17
@@ -7,8 +13,29 @@ services:
       POSTGRES_DB: basal
     ports: ["5432:5432"]
     volumes: [pgdata:/var/lib/postgresql/data]
+
   redis:
     image: redis:8
     ports: ["6379:6379"]
+
+  basal-rs:
+    profiles: [gpu]
+    image: ghcr.io/itsoltech/basal-rs:${BASAL_RS_TAG:-v0.1}
+    # arguments of `basal serve`: --model mini | 4.5B | max (default 4.5B)
+    command: ["--model", "${BASAL_MODEL:-4.5B}"]
+    ports: ["8000:8000"]
+    volumes: [basal-data:/data]
+    environment:
+      HF_TOKEN: ${HF_TOKEN:-}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped
+
 volumes:
   pgdata:
+  basal-data:

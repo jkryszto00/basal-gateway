@@ -84,7 +84,7 @@ The gateway forwards to anything that serves the basal API (`POST /v1/systemone`
 model name in `UPSTREAMS`:
 
 ```bash
-UPSTREAMS={"basal-1.5":{"url":"http://localhost:8000","maxInFlight":64,"timeoutMs":180000,"token":"optional"}}
+UPSTREAMS={"basal-1.5":{"url":"http://localhost:8000","path":"/v1/basal","maxInFlight":64,"timeoutMs":180000}}
 ```
 
 | server | where | notes |
@@ -93,9 +93,33 @@ UPSTREAMS={"basal-1.5":{"url":"http://localhost:8000","maxInFlight":64,"timeoutM
 | [basal-serve](https://github.com/rkinas/basal) | NVIDIA GPU, Apple Silicon, CPU | the reference Python server; engines: PyTorch, vLLM, SGLang, MLX, llama.cpp |
 | [Modal template](inference/) | serverless GPU | basal-serve with a GPU memory snapshot, scales to zero |
 
-`token` is sent as `Authorization: Bearer <token>` (for example a Modal proxy token); leave it out for a server on a
-private network. `maxInFlight` caps requests in flight to that server; beyond it the gateway answers 503 instead of
-queueing.
+| field | default | |
+|---|---|---|
+| `url` | | base URL of the server |
+| `path` | `/v1/systemone` | endpoint to call: `/v1/systemone` for basal-serve, `/v1/basal` for basal-rs (its endpoint with basal-serve's semantics; its `/v1/systemone` follows the stricter TypeSafe contract) |
+| `model` | | model name sent in the request, for one basal-rs process serving several models (e.g. `basal-1.5-max`) |
+| `token` | | sent as `Authorization: Bearer <token>` (e.g. a Modal proxy token); leave out on a private network |
+| `maxInFlight` | `64` | requests in flight to this server; beyond it the gateway answers 503 instead of queueing |
+| `timeoutMs` | `180000` | per request, long enough for a serverless cold start |
+
+A server that answers 503 or 529 (basal-rs, queue full) is reported to the client as 503 `overloaded` with
+`retry-after`.
+
+### basal-rs with Docker
+
+On a machine with an NVIDIA GPU and the [NVIDIA Container
+Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/):
+
+```bash
+docker compose --profile gpu up -d          # basal-rs on :8000, BASAL_MODEL=mini|4.5B|max (default 4.5B)
+docker compose logs -f basal-rs             # first start: model download and GEMM tables, minutes
+```
+
+```bash
+UPSTREAMS={"basal-1.5":{"url":"http://localhost:8000","path":"/v1/basal"}}
+```
+
+On a Mac, run basal-rs natively (Metal): `brew install itsoltech/tap/basal-rs && basal serve`.
 
 ## Configuration
 
@@ -170,7 +194,7 @@ WEB_LOG=/tmp/web.log bun run e2e
 - Offline mode: every external service optional, for air-gapped installs
 - Usage export (CSV, API)
 - Upstream failover and overflow
-- Docker Compose with basal-rs, one command from clone to API
+- Docker images for the gateway and dashboard: one `docker compose up` from clone to API
 
 ## License
 
