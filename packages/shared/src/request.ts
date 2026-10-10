@@ -47,7 +47,11 @@ export const decisionRequest = z
     if (r.state === undefined || r.state === null) return; // already reported by the state refinement
     const chars = typeof r.state === "string" ? r.state.length : (JSON.stringify(r.state)?.length ?? 0);
     if (chars > LIMITS.maxStateChars) {
-      ctx.addIssue({ code: "custom", message: `state is ${chars} chars, limit ${LIMITS.maxStateChars}`, path: ["state"] });
+      ctx.addIssue({
+        code: "custom",
+        message: `state is ${chars} chars, limit ${LIMITS.maxStateChars}`,
+        path: ["state"],
+      });
     }
   });
 

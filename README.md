@@ -214,6 +214,7 @@ inference/        basal-serve on Modal (Python, uv)
 bun run typecheck
 bun run test          # gateway integration tests use Postgres and Redis from docker compose
 bun run db:generate   # after changing packages/db/src/schema.ts
+bun run format        # Prettier (bun run format:check in CI)
 ```
 
 Browser smoke test of the dashboard (sign up, confirmation, keys, password reset, account deletion), against a

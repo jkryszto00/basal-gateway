@@ -47,7 +47,9 @@ export async function addUser({ db }: Ctx, email: string, opts: { name?: string;
   await db.transaction(async (tx) => {
     const [taken] = await tx.select({ id: user.id }).from(user).where(eq(user.email, address));
     if (taken) throw new Error(`${address} already has an account`);
-    await tx.insert(user).values({ id, email: address, name: opts.name ?? address.split("@")[0]!, emailVerified: true });
+    await tx
+      .insert(user)
+      .values({ id, email: address, name: opts.name ?? address.split("@")[0]!, emailVerified: true });
     await tx.insert(account).values({
       id: randomUUID(),
       accountId: id,

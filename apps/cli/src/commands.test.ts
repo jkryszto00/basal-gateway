@@ -55,7 +55,14 @@ describe("admin commands", () => {
 
   it("reports usage per account and model", async () => {
     const [u] = await db.select().from(user).where(eq(user.email, email));
-    const event = { userId: u!.id, model: "basal-1.5", questions: 2, branches: 3, upstreamLatencyMs: 5, totalLatencyMs: 9 };
+    const event = {
+      userId: u!.id,
+      model: "basal-1.5",
+      questions: 2,
+      branches: 3,
+      upstreamLatencyMs: 5,
+      totalLatencyMs: 9,
+    };
     await db.insert(usageEvents).values([
       { ...event, id: crypto.randomUUID(), inputTokens: 100 },
       { ...event, id: crypto.randomUUID(), inputTokens: 50 },

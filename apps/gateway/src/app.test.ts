@@ -64,7 +64,9 @@ beforeAll(async () => {
     if ("model" in req) return c.json({ error: "model must not be forwarded" }, 500);
     return c.json({
       model: "basal-1.5-4.5B",
-      answers: { dept: { type: "choice", choice: "online", probabilities: { cards: 0.01, online: 0.99 }, confidence: 0.99 } },
+      answers: {
+        dept: { type: "choice", choice: "online", probabilities: { cards: 0.01, online: 0.99 }, confidence: 0.99 },
+      },
       usage: { input_tokens: 300, output_tokens: 0, questions: 1, branches: 1, latency_ms: 12.5 },
     });
   });
@@ -75,7 +77,9 @@ beforeAll(async () => {
     if (req.state === "busy") return new Response(JSON.stringify({ error: "overloaded" }), { status: 529 });
     return c.json({
       model: "basal-1.5-max",
-      answers: { dept: { type: "choice", choice: "cards", probabilities: { cards: 0.9, online: 0.1 }, confidence: 0.9 } },
+      answers: {
+        dept: { type: "choice", choice: "cards", probabilities: { cards: 0.9, online: 0.1 }, confidence: 0.9 },
+      },
       usage: { input_tokens: 100, output_tokens: 0, questions: 1, branches: 1, latency_ms: 8 },
     });
   });
@@ -188,7 +192,10 @@ describe("POST /v1/systemone", () => {
     expect(upstreamCalls).toBe(0);
     const ok = await post(key, body(), hooked);
     expect(ok.status).toBe(200);
-    expect(((await ok.json()) as { usage: Record<string, number> }).usage).toMatchObject({ input_tokens: 300, cost: 42 });
+    expect(((await ok.json()) as { usage: Record<string, number> }).usage).toMatchObject({
+      input_tokens: 300,
+      cost: 42,
+    });
     expect(seenEvents).toEqual([{ model: "basal-1.5", inputTokens: 300 }]);
   });
   it("calls a configured path and model, and maps the server's 529 to 503", async () => {
@@ -210,7 +217,9 @@ describe("POST /v1/systemone", () => {
     expect(named.model).toBe("basal-1.5");
     const unknown = await post(key, { ...body(), model: "nope" }, rs);
     expect(unknown.status).toBe(404);
-    expect(((await unknown.json()) as { error: { message: string } }).error.message).toContain("basal-1.5, basal-1.5-max");
+    expect(((await unknown.json()) as { error: { message: string } }).error.message).toContain(
+      "basal-1.5, basal-1.5-max",
+    );
   });
   it("lists models with the default", async () => {
     const res = await rs.request("/v1/models");
@@ -234,7 +243,14 @@ describe("POST /v1/systemone", () => {
 
     expect(await new UsageFlusher(db, redis).flush()).toBe(1);
     const [ev] = await db.select().from(usageEvents).where(eq(usageEvents.id, json.id));
-    expect(ev).toMatchObject({ userId, apiKeyId: keyId, model: "basal-1.5", inputTokens: 300, questions: 1, branches: 1 });
+    expect(ev).toMatchObject({
+      userId,
+      apiKeyId: keyId,
+      model: "basal-1.5",
+      inputTokens: 300,
+      questions: 1,
+      branches: 1,
+    });
     const [k] = await db.select().from(apiKeys).where(eq(apiKeys.id, keyId));
     expect(k?.lastUsedAt).not.toBeNull();
   });

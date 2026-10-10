@@ -2,9 +2,7 @@ import type { z } from "zod";
 import { type UpstreamConfig, upstreamConfig } from "./env";
 
 export type UpstreamResult =
-  | { kind: "ok"; status: number; body: unknown }
-  | { kind: "timeout" }
-  | { kind: "network"; error: string };
+  { kind: "ok"; status: number; body: unknown } | { kind: "timeout" } | { kind: "network"; error: string };
 
 /** One inference server speaking the basal API (basal-serve or basal-rs: own GPU, Modal, RunPod, ...). */
 export class Upstream {

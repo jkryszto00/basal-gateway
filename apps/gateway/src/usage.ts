@@ -56,7 +56,9 @@ export class UsageFlusher {
       await this.db.transaction(async (tx) => {
         // events of an account deleted meanwhile would fail the foreign key and block the queue for everyone
         const ids = [...new Set(events.map((e) => e.userId))];
-        const live = new Set((await tx.select({ id: user.id }).from(user).where(inArray(user.id, ids))).map((u) => u.id));
+        const live = new Set(
+          (await tx.select({ id: user.id }).from(user).where(inArray(user.id, ids))).map((u) => u.id),
+        );
         const dropped = events.length - (events = events.filter((e) => live.has(e.userId))).length;
         if (dropped) console.warn(`usage flush: dropped ${dropped} events of deleted accounts`);
         if (!events.length) return;

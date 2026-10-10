@@ -3,7 +3,11 @@ import type { ComponentProps } from "react";
 export const inputClass =
   "w-full rounded-md border border-line bg-card px-3 py-2 text-sm outline-none focus:border-accent focus:ring-2 focus:ring-accent/20";
 
-export function Button({ className = "", variant = "primary", ...props }: ComponentProps<"button"> & { variant?: "primary" | "ghost" | "danger" }) {
+export function Button({
+  className = "",
+  variant = "primary",
+  ...props
+}: ComponentProps<"button"> & { variant?: "primary" | "ghost" | "danger" }) {
   const styles = {
     primary: "bg-accent text-accent-fg hover:opacity-90",
     ghost: "border border-line hover:bg-line/50",
