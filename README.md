@@ -30,7 +30,8 @@ web (Next.js) ── sign up, API keys, usage, balance, settings
 - **Accounts**: email and password with confirmation links and password reset, optional GitHub and Google sign in,
   breached-password check (Have I Been Pwned), optional Cloudflare Turnstile, rate-limited sign in, sign up and resets,
   password change and account deletion.
-- **Several models**: each public model name maps to its own inference server (`UPSTREAMS`).
+- **Several models**: each public model name maps to an inference server and a price (`UPSTREAMS`); clients pick one
+  with `"model"`, the dashboard lists them and breaks usage down per model.
 
 ## Quick start
 
@@ -102,8 +103,35 @@ UPSTREAMS={"basal-1.5":{"url":"http://localhost:8000","path":"/v1/basal","maxInF
 | `maxInFlight` | `64` | requests in flight to this server; beyond it the gateway answers 503 instead of queueing |
 | `timeoutMs` | `180000` | per request, long enough for a serverless cold start |
 
+| `pricing` | by name | `{"inputPerMTok": 50000, "perKBranch": 20000}` in micro-USD; see below |
+
 A server that answers 503 or 529 (basal-rs, queue full) is reported to the client as 503 `overloaded` with
 `retry-after`.
+
+### Several models
+
+Every entry in `UPSTREAMS` is a model clients can pick with `"model"` in the request; requests without it go to
+`DEFAULT_MODEL` (the first entry by default). Several entries can point at the same basal-rs process:
+
+```bash
+UPSTREAMS={
+  "basal-1.5-mini": {"url":"http://gpu:8000","path":"/v1/basal","model":"basal-1.5-mini"},
+  "basal-1.5":      {"url":"http://gpu:8000","path":"/v1/basal","model":"basal-1.5-4.5B"},
+  "basal-1.5-max":  {"url":"https://<workspace>--basal-1-5-max-fast-nocompile-basal-web.modal.run","token":"wk-….ws-…"}
+}
+DEFAULT_MODEL=basal-1.5
+```
+
+A request's cost is `input_tokens × inputPerMTok / 1M + branches × perKBranch / 1k` (a branch is one question, or one
+label of a `multi` question). A model without `pricing` uses the default list for its name:
+
+| model | per 1M input tokens | per 1k branches |
+|---|---|---|
+| `basal-1.5-mini` | $0.02 | $0.01 |
+| `basal-1.5`, `basal-1.5-4.5B` | $0.05 | $0.02 |
+| `basal-1.5-max` | $0.12 | $0.04 |
+
+Any other name is free (usage is still recorded). `GET /v1/models` lists the models, the default and their prices.
 
 ### basal-rs with Docker
 
@@ -129,6 +157,7 @@ All settings are environment variables, read from `.env` at the repository root 
 |---|---|---|
 | `DATABASE_URL`, `REDIS_URL` | | Postgres and Redis |
 | `UPSTREAMS` | | model name → inference server (JSON, see above) |
+| `DEFAULT_MODEL` | first in `UPSTREAMS` | model of requests without `"model"` |
 | `GATEWAY_PORT` | `8787` | |
 | `USER_RPM_LIMIT`, `USER_CONCURRENCY_LIMIT` | `120`, `16` | per account over all its keys; each key also has its own limits (60/min, 8) |
 | `USER_DAILY_REQUESTS` | `0` | requests per UTC day per account, `0` = unlimited |
@@ -136,14 +165,14 @@ All settings are environment variables, read from `.env` at the repository root 
 | `APP_NAME` | `basal gateway` | shown in the dashboard and emails |
 | `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL` | | session secret and the dashboard's public URL |
 | `NEXT_PUBLIC_API_URL` | `http://localhost:8787` | gateway URL shown in the dashboard |
+| `GATEWAY_INTERNAL_URL` | `NEXT_PUBLIC_API_URL` | where the dashboard reaches the gateway for its model list |
 | `SIGNUP_CREDIT_MICROUSD` | `0` | credits for each new account once its email is confirmed |
 | `CLIENT_IP_HEADER` | `x-forwarded-for` | header with the visitor's IP (`cf-connecting-ip` behind Cloudflare); only trust it if the dashboard cannot be reached around your proxy |
 | `RESEND_API_KEY`, `EMAIL_FROM` | | email through Resend; without a key emails are printed to the log |
 | `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` | | optional Cloudflare Turnstile on sign up |
 | `GITHUB_CLIENT_ID`/`_SECRET`, `GOOGLE_CLIENT_ID`/`_SECRET` | | optional OAuth sign in; callback `<BETTER_AUTH_URL>/api/auth/callback/<github\|google>` |
 
-Prices per model are in [`packages/shared/src/pricing.ts`](packages/shared/src/pricing.ts) (micro-USD per million
-input tokens and per thousand branches).
+Default prices per model are in [`packages/shared/src/pricing.ts`](packages/shared/src/pricing.ts).
 
 ## API errors
 
@@ -154,7 +183,7 @@ Errors are `{"error": {"code", "message"}}`:
 | 400 | `invalid_json` | |
 | 401 | `unauthorized` | missing, unknown or revoked API key |
 | 402 | `insufficient_credits` | balance is zero (with `CREDITS_ENABLED`) |
-| 404 | `unknown_model` | |
+| 404 | `unknown_model` | the message lists the available models |
 | 413 | `payload_too_large` | body over 256 KiB |
 | 422 | `invalid_request` | does not match the schema, or the model rejected it |
 | 429 | `rate_limited`, `concurrency_limited`, `daily_limit_reached` | with `retry-after` |
