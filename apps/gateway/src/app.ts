@@ -1,0 +1,192 @@
+import { randomUUID } from "node:crypto";
+import type { Db } from "@basal/db";
+import { costMicroUsd, DEFAULT_MODEL, decisionRequest, decisionUsage, MODELS } from "@basal/shared";
+import { type Context, Hono } from "hono";
+import { bodyLimit } from "hono/body-limit";
+import type { ContentfulStatusCode } from "hono/utils/http-status";
+import type { Redis } from "ioredis";
+import { z } from "zod";
+import { resolveKey } from "./auth";
+import { charge, getBalance } from "./billing";
+import { acquireSlot, checkDaily, checkRate, releaseSlot } from "./limits";
+import type { Upstream } from "./upstream";
+
+/** Limits per account, summed over all its API keys (10 keys x 60 rpm would otherwise allow 600 rpm). */
+export type UserLimits = {
+  rpm: number;
+  concurrency: number;
+  /** requests per UTC day; 0 means no daily limit */
+  dailyRequests: number;
+};
+
+export type Deps = {
+  db: Db;
+  redis: Redis;
+  upstreams: Map<string, Upstream>;
+  userLimits: UserLimits;
+  /** refuse requests (402) when the account's balance is zero; usage and cost are recorded either way */
+  requireCredits: boolean;
+};
+
+type ErrorCode =
+  | "unauthorized"
+  | "invalid_json"
+  | "payload_too_large"
+  | "invalid_request"
+  | "unknown_model"
+  | "rate_limited"
+  | "concurrency_limited"
+  | "daily_limit_reached"
+  | "insufficient_credits"
+  | "overloaded"
+  | "upstream_error"
+  | "upstream_timeout";
+
+const fail = (code: ErrorCode, message: string, status: ContentfulStatusCode, details?: unknown) =>
+  Response.json({ error: { code, message, ...(details ? { details } : {}) } }, { status });
+
+/** Rejected before parsing; a maximal valid request (32k-char state, 16 questions) is far below it. */
+export const MAX_BODY_BYTES = 256 * 1024;
+
+const upstreamResponse = z.looseObject({ answers: z.record(z.string(), z.unknown()), usage: decisionUsage });
+
+export function createApp({ db, redis, upstreams, userLimits, requireCredits }: Deps) {
+  const app = new Hono();
+
+  app.get("/health", (c) => c.json({ status: "ok" }));
+
+  app.use(
+    "/v1/*",
+    bodyLimit({
+      maxSize: MAX_BODY_BYTES,
+      onError: () => fail("payload_too_large", `request body is larger than ${MAX_BODY_BYTES / 1024} KiB`, 413),
+    }),
+  );
+
+  app.get("/v1/models", (c) =>
+    c.json({
+      models: [...upstreams.keys()].map((name) => ({
+        name,
+        pricing: MODELS[name] ?? null, // micro-USD per 1M input tokens and per 1k branches
+      })),
+    }),
+  );
+
+  const decide = async (c: Context) => {
+    const t0 = performance.now();
+    const requestId = randomUUID();
+
+    const key = await resolveKey(db, redis, c.req.header("authorization"));
+    if (!key) return fail("unauthorized", "missing or invalid API key", 401);
+
+    let raw: unknown;
+    try {
+      raw = await c.req.json();
+    } catch {
+      return fail("invalid_json", "request body is not valid JSON", 400);
+    }
+    const parsed = decisionRequest.safeParse(raw);
+    if (!parsed.success) return fail("invalid_request", "request does not match the schema", 422, z.treeifyError(parsed.error));
+    const { model = DEFAULT_MODEL, ...body } = parsed.data;
+
+    const upstream = upstreams.get(model);
+    const price = MODELS[model];
+    if (!upstream || !price) return fail("unknown_model", `unknown model ${model}`, 404);
+
+    const keyScope = `key:${key.keyId}` as const;
+    const userScope = `user:${key.userId}` as const;
+    for (const [scope, rpm, of] of [
+      [keyScope, key.rpmLimit, "this API key"],
+      [userScope, userLimits.rpm, "this account"],
+    ] as const) {
+      const rate = await checkRate(redis, scope, rpm);
+      if (!rate.ok) {
+        const res = fail("rate_limited", `limit of ${rpm} requests per minute for ${of}`, 429);
+        res.headers.set("retry-after", String(rate.retryAfterS));
+        return res;
+      }
+    }
+
+    if (requireCredits && (await getBalance(db, redis, key.userId)) <= 0)
+      return fail("insufficient_credits", "balance is empty", 402);
+
+    if (userLimits.dailyRequests > 0) {
+      const daily = await checkDaily(redis, key.userId, userLimits.dailyRequests);
+      if (!daily.ok) {
+        const res = fail(
+          "daily_limit_reached",
+          `limit of ${userLimits.dailyRequests} requests per day for this account, resets at 00:00 UTC`,
+          429,
+        );
+        res.headers.set("retry-after", String(daily.retryAfterS));
+        return res;
+      }
+    }
+
+    if (!(await acquireSlot(redis, keyScope, key.concurrencyLimit, requestId))) {
+      return fail("concurrency_limited", `limit of ${key.concurrencyLimit} concurrent requests for this API key`, 429);
+    }
+    if (!(await acquireSlot(redis, userScope, userLimits.concurrency, requestId))) {
+      await releaseSlot(redis, keyScope, requestId);
+      return fail("concurrency_limited", `limit of ${userLimits.concurrency} concurrent requests for this account`, 429);
+    }
+    try {
+      if (!upstream.tryAcquire()) return fail("overloaded", "model is at capacity, retry shortly", 503);
+      let result;
+      try {
+        result = await upstream.decide(body);
+      } finally {
+        upstream.release();
+      }
+
+      if (result.kind === "timeout") return fail("upstream_timeout", "inference timed out", 504);
+      if (result.kind === "network") {
+        console.error(`[${requestId}] upstream ${model} unreachable: ${result.error}`);
+        return fail("upstream_error", "inference backend unreachable", 502);
+      }
+      if (result.status === 400 || result.status === 422) {
+        const message = (result.body as { error?: unknown })?.error;
+        return fail("invalid_request", typeof message === "string" ? message : "rejected by the model", 422);
+      }
+      const out = upstreamResponse.safeParse(result.body);
+      if (result.status !== 200 || !out.success) {
+        console.error(`[${requestId}] upstream ${model} status ${result.status}`, result.body);
+        return fail("upstream_error", "inference failed", 502);
+      }
+
+      const usage = out.data.usage;
+      const cost = costMicroUsd(price, usage);
+      const totalMs = performance.now() - t0;
+      await charge(redis, {
+        id: requestId,
+        userId: key.userId,
+        apiKeyId: key.keyId,
+        model,
+        inputTokens: usage.input_tokens,
+        questions: usage.questions,
+        branches: usage.branches,
+        costMicroUsd: cost,
+        upstreamLatencyMs: usage.latency_ms,
+        totalLatencyMs: totalMs,
+        createdAt: new Date().toISOString(),
+      });
+      return Response.json(
+        { id: requestId, ...out.data, model, usage: { ...usage, cost_micro_usd: cost } },
+        { headers: { "x-request-id": requestId } },
+      );
+    } finally {
+      await Promise.all([releaseSlot(redis, keyScope, requestId), releaseSlot(redis, userScope, requestId)]);
+    }
+  };
+
+  // /v1/basal is basal-serve's alias of the same endpoint
+  app.post("/v1/systemone", (c) => decide(c));
+  app.post("/v1/basal", (c) => decide(c));
+
+  app.onError((e) => {
+    console.error(e);
+    return fail("upstream_error", "internal error", 500);
+  });
+
+  return app;
+}

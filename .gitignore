@@ -1,0 +1,16 @@
+node_modules/
+.turbo/
+.next/
+dist/
+.env
+.env.*
+!.env.example
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+*.tsbuildinfo
+next-env.d.ts
+
+# agent tool files (e.g. `modal skills`)
+.agents/

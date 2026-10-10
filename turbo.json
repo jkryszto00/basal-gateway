@@ -1,0 +1,10 @@
+{
+  "$schema": "https://turborepo.com/schema.json",
+  "globalEnv": ["DATABASE_URL", "REDIS_URL"],
+  "tasks": {
+    "build": { "dependsOn": ["^build"], "outputs": [".next/**", "!.next/cache/**", "dist/**"] },
+    "typecheck": { "dependsOn": ["^typecheck"] },
+    "test": {},
+    "dev": { "cache": false, "persistent": true }
+  }
+}

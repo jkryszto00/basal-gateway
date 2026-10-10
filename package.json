@@ -1,0 +1,22 @@
+{
+  "name": "basal-gateway",
+  "private": true,
+  "packageManager": "bun@1.3.14",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "db:up": "docker compose up -d postgres redis",
+    "db:generate": "bun --filter @basal/db generate",
+    "db:migrate": "bun --filter @basal/db migrate"
+  },
+  "devDependencies": {
+    "turbo": "^2.11.7",
+    "typescript": "^5"
+  }
+}

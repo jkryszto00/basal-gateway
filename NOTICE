@@ -1,0 +1,11 @@
+basal gateway
+Copyright 2026 The basal gateway authors
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+It serves and talks to basal, by Remigiusz Kinas (https://github.com/rkinas/basal), licensed under the Apache
+License, Version 2.0. inference/modal_app.py installs basal from its GitHub releases. basal-rs
+(https://github.com/itsoltech/basal-rs) by IT SOL is a separate project under the Apache License, Version 2.0.
+basal model weights are published on Hugging Face under their own licenses.
+
+This project is not affiliated with or endorsed by the authors of basal or basal-rs.
