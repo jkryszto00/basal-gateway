@@ -16,7 +16,8 @@
     "db:migrate": "bun --filter @basal/db migrate",
     "admin": "bun run --cwd apps/cli admin",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "mock": "bun run --cwd apps/mock start"
   },
   "devDependencies": {
     "prettier": "^3",

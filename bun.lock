@@ -37,6 +37,16 @@
         "typescript": "^5",
       },
     },
+    "apps/mock": {
+      "name": "@basal/mock",
+      "dependencies": {
+        "@basal/shared": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/bun": "^1.3.14",
+        "typescript": "^5",
+      },
+    },
     "apps/web": {
       "name": "@basal/web",
       "version": "0.1.0",
@@ -128,6 +138,8 @@
     "@basal/db": ["@basal/db@workspace:packages/db"],
 
     "@basal/gateway": ["@basal/gateway@workspace:apps/gateway"],
+
+    "@basal/mock": ["@basal/mock@workspace:apps/mock"],
 
     "@basal/shared": ["@basal/shared@workspace:packages/shared"],
 

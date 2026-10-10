@@ -39,7 +39,7 @@ web (Next.js) ── sign up, API keys, usage, balance, settings
 ## Quick start
 
 Requirements: [Bun](https://bun.sh) 1.3+, Node.js 20+ (the dashboard runs on Next.js), Docker, and an inference
-server.
+server, or the mock server to try everything without a GPU.
 
 ```bash
 git clone https://github.com/jkryszto00/basal-gateway.git && cd basal-gateway
@@ -47,6 +47,7 @@ bun install
 cp .env.example .env              # set BETTER_AUTH_SECRET (openssl rand -hex 32) and UPSTREAMS
 bun run db:up                     # Postgres and Redis (docker compose)
 bun run db:migrate
+bun run mock                      # no GPU yet? a mock basal server on :8000 (made-up answers)
 bun run dev                       # dashboard on :3000, gateway on :8787
 ```
 
@@ -103,6 +104,7 @@ UPSTREAMS={"basal-1.5":{"url":"http://localhost:8000","path":"/v1/basal","maxInF
 | [basal-rs](https://github.com/itsoltech/basal-rs) | NVIDIA GPU (CUDA), Apple Silicon (Metal) | Rust, no Python; `basal serve` or its Docker image. Recommended. |
 | [basal-serve](https://github.com/rkinas/basal) | NVIDIA GPU, Apple Silicon, CPU | the reference Python server; engines: PyTorch, vLLM, SGLang, MLX, llama.cpp |
 | [Modal template](inference/) | serverless GPU | basal-serve with a GPU memory snapshot, scales to zero |
+| mock (`bun run mock`) | anywhere | made-up, deterministic answers with basal's response shape, for development and tests; never for real use |
 
 | field | default | |
 |---|---|---|
@@ -205,6 +207,7 @@ Only successful requests are recorded as usage.
 apps/gateway      Hono on Bun: /v1/systemone, /v1/basal, /v1/models, auth, limits, billing
 apps/web          Next.js: dashboard and accounts (Better Auth)
 apps/cli          admin CLI (bun run admin)
+apps/mock         mock basal server for development and tests (bun run mock)
 packages/db       Drizzle schema and migrations
 packages/shared   request schema, usage, API key helpers
 inference/        basal-serve on Modal (Python, uv)
@@ -216,6 +219,10 @@ bun run test          # gateway integration tests use Postgres and Redis from do
 bun run db:generate   # after changing packages/db/src/schema.ts
 bun run format        # Prettier (bun run format:check in CI)
 ```
+
+The mock server (`MOCK_PORT`, default 8000) answers `/v1/systemone` and `/v1/basal` like basal, and simulates errors
+with special states: `"mock:422"` (rejected by the model), `"mock:529"` (overloaded), `"mock:500"` (inference
+failure), `"mock:slow:5000"` (answers after 5 s).
 
 Browser smoke test of the dashboard (sign up, confirmation, keys, password reset, account deletion), against a
 running app started without `RESEND_API_KEY` so emails land in its log:
