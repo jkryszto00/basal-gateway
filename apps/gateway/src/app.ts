@@ -144,6 +144,12 @@ export function createApp({ db, redis, upstreams, userLimits, requireCredits }: 
         console.error(`[${requestId}] upstream ${model} unreachable: ${result.error}`);
         return fail("upstream_error", "inference backend unreachable", 502);
       }
+      if (result.status === 503 || result.status === 529) {
+        // the server's own admission limit (basal-rs answers 529 when its queue is full)
+        const res = fail("overloaded", "the inference server is busy, retry shortly", 503);
+        res.headers.set("retry-after", "1");
+        return res;
+      }
       if (result.status === 400 || result.status === 422) {
         const message = (result.body as { error?: unknown })?.error;
         return fail("invalid_request", typeof message === "string" ? message : "rejected by the model", 422);

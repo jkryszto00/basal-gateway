@@ -1,16 +1,23 @@
 import { z } from "zod";
 
-const upstream = z.object({
+export const upstreamConfig = z.object({
   url: z.url(),
   /** sent as `Authorization: Bearer <token>`; leave out for an upstream on a private network */
   token: z.string().min(1).optional(),
+  /**
+   * Endpoint to call. basal-serve: /v1/systemone. basal-rs: /v1/basal, its endpoint with basal-serve's semantics
+   * (its /v1/systemone follows the stricter TypeSafe contract).
+   */
+  path: z.string().startsWith("/").default("/v1/systemone"),
+  /** model name sent in the request, for a server with several models in one process (basal-rs) */
+  model: z.string().min(1).optional(),
   /** requests in flight to this upstream before the gateway answers 503 instead of queueing */
   maxInFlight: z.number().int().positive().default(64),
   /** a scaled-to-zero Modal container needs time to restore its snapshot */
   timeoutMs: z.number().int().positive().default(180_000),
 });
 
-export type UpstreamConfig = z.infer<typeof upstream>;
+export type UpstreamConfig = z.infer<typeof upstreamConfig>;
 
 const schema = z.object({
   DATABASE_URL: z.string().min(1),
@@ -34,7 +41,7 @@ const schema = z.object({
         return z.NEVER;
       }
     })
-    .pipe(z.record(z.string(), upstream)),
+    .pipe(z.record(z.string(), upstreamConfig)),
 });
 
 export type Env = z.infer<typeof schema>;

@@ -18,6 +18,7 @@ let app: ReturnType<typeof createApp>;
 let strict: ReturnType<typeof createApp>; // low per-account limits
 let daily: ReturnType<typeof createApp>; // low daily limit
 let open: ReturnType<typeof createApp>; // credits not required
+let rs: ReturnType<typeof createApp>; // basal-rs style upstream
 
 const limits = (overrides: Partial<UserLimits> = {}): UserLimits => ({
   rpm: 1_000,
@@ -64,6 +65,17 @@ beforeAll(async () => {
       usage: { input_tokens: 300, output_tokens: 0, questions: 1, branches: 1, latency_ms: 12.5 },
     });
   });
+  // basal-rs: several models in one process, chosen by the request's "model"; 529 when its queue is full
+  upstream.post("/v1/basal", async (c) => {
+    const req = await c.req.json();
+    if (req.model !== "basal-1.5-max") return c.json({ error: `Unknown model: ${req.model}` }, 422);
+    if (req.state === "busy") return new Response(JSON.stringify({ error: "overloaded" }), { status: 529 });
+    return c.json({
+      model: "basal-1.5-max",
+      answers: { dept: { type: "choice", choice: "cards", probabilities: { cards: 0.9, online: 0.1 }, confidence: 0.9 } },
+      usage: { input_tokens: 100, output_tokens: 0, questions: 1, branches: 1, latency_ms: 8 },
+    });
+  });
   fake = Bun.serve({ fetch: upstream.fetch, port: 0 });
   const url = `http://127.0.0.1:${fake.port}`;
   app = createApp({
@@ -93,6 +105,13 @@ beforeAll(async () => {
     db,
     redis,
     upstreams: createUpstreams({ "basal-1.5": { url, token: "upstream-secret", maxInFlight: 10, timeoutMs: 5_000 } }),
+    userLimits: limits(),
+    requireCredits: false,
+  });
+  rs = createApp({
+    db,
+    redis,
+    upstreams: createUpstreams({ "basal-1.5": { url, path: "/v1/basal", model: "basal-1.5-max" } }), // public name -> server model
     userLimits: limits(),
     requireCredits: false,
   });
@@ -140,6 +159,17 @@ describe("POST /v1/systemone", () => {
     const { key } = await newKey();
     expect((await post(key, body())).status).toBe(402);
     expect(upstreamCalls).toBe(0);
+  });
+
+  it("calls a configured path and model, and maps the server's 529 to 503", async () => {
+    const { key } = await newKey();
+    const res = await post(key, body(), rs);
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { answers: { dept: { choice: string } } }).answers.dept.choice).toBe("cards");
+    const busy = await post(key, body("busy"), rs);
+    expect(busy.status).toBe(503);
+    expect(((await busy.json()) as { error: { code: string } }).error.code).toBe("overloaded");
+    expect(busy.headers.get("retry-after")).toBe("1");
   });
 
   it("serves and meters an empty balance when credits are not required", async () => {
