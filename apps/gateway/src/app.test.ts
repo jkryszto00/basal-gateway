@@ -1,12 +1,12 @@
 // Integration test: real Postgres + Redis from docker compose (`bun run db:up && bun run db:migrate`), fake
 // inference server.
-import { apiKeys, createDb, creditTransactions, eq, usageEvents, user } from "@basal/db";
-import { balanceCacheKey, generateApiKey } from "@basal/shared/keys";
+import { apiKeys, createDb, eq, usageEvents, user } from "@basal/db";
+import { generateApiKey } from "@basal/shared/keys";
 import { Hono } from "hono";
 import { Redis } from "ioredis";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
-import { createApp, type UserLimits } from "./app";
-import { UsageFlusher } from "./billing";
+import { apiError, createApp, type UserLimits } from "./app";
+import { UsageFlusher } from "./usage";
 import { createUpstreams } from "./upstream";
 
 const db = createDb(process.env.DATABASE_URL ?? "postgres://basal:basal@localhost:5432/basal");
@@ -20,6 +20,9 @@ let daily: ReturnType<typeof createApp>; // low daily limit
 let open: ReturnType<typeof createApp>; // credits not required
 let rs: ReturnType<typeof createApp>; // basal-rs style upstream
 let v10: ReturnType<typeof createApp>; // basal-1.0 server
+let hooked: ReturnType<typeof createApp>; // with extension hooks
+let seenEvents: { model: string; inputTokens: number }[] = [];
+let refuseNext = false;
 
 const limits = (overrides: Partial<UserLimits> = {}): UserLimits => ({
   rpm: 1_000,
@@ -95,7 +98,6 @@ beforeAll(async () => {
       "basal-1.5": { url, token: "upstream-secret", maxInFlight: 1, timeoutMs: 5_000 },
     }),
     userLimits: limits(),
-    requireCredits: true,
     defaultModel: "basal-1.5",
   });
   strict = createApp({
@@ -103,7 +105,6 @@ beforeAll(async () => {
     redis,
     upstreams: createUpstreams({ "basal-1.5": { url, token: "upstream-secret", maxInFlight: 10, timeoutMs: 5_000 } }),
     userLimits: limits({ rpm: 3, concurrency: 1 }),
-    requireCredits: true,
     defaultModel: "basal-1.5",
   });
   daily = createApp({
@@ -111,7 +112,6 @@ beforeAll(async () => {
     redis,
     upstreams: createUpstreams({ "basal-1.5": { url, token: "upstream-secret", maxInFlight: 10, timeoutMs: 5_000 } }),
     userLimits: limits({ dailyRequests: 2 }),
-    requireCredits: true,
     defaultModel: "basal-1.5",
   });
   open = createApp({
@@ -119,7 +119,6 @@ beforeAll(async () => {
     redis,
     upstreams: createUpstreams({ "basal-1.5": { url, token: "upstream-secret", maxInFlight: 10, timeoutMs: 5_000 } }),
     userLimits: limits(),
-    requireCredits: false,
     defaultModel: "basal-1.5",
   });
   rs = createApp({
@@ -127,11 +126,9 @@ beforeAll(async () => {
     redis,
     upstreams: createUpstreams({
       "basal-1.5": { url, path: "/v1/basal", model: "basal-1.5-max" }, // public name -> server model
-      "basal-1.5-max": { url, path: "/v1/basal", model: "basal-1.5-max", pricing: { inputPerMTok: 1_000_000, perKBranch: 0 } },
-      "my-finetune": { url, path: "/v1/basal", model: "basal-1.5-max" }, // not in the price list: free
+      "basal-1.5-max": { url, path: "/v1/basal", model: "basal-1.5-max" },
     }),
     userLimits: limits(),
-    requireCredits: false,
     defaultModel: "basal-1.5-max",
   });
   v10 = createApp({
@@ -139,8 +136,22 @@ beforeAll(async () => {
     redis,
     upstreams: createUpstreams({ "basal-1.0": { url, path: "/v1/basal10" } }),
     userLimits: limits(),
-    requireCredits: false,
     defaultModel: "basal-1.0",
+  });
+  hooked = createApp({
+    db,
+    redis,
+    upstreams: createUpstreams({ "basal-1.5": { url, token: "upstream-secret" } }),
+    userLimits: limits(),
+    defaultModel: "basal-1.5",
+    hooks: {
+      // what a hosted build would do with prepaid credits
+      beforeUpstream: () => (refuseNext ? apiError("insufficient_credits", "balance is empty", 402) : undefined),
+      onUsage: (_ctx, event) => {
+        seenEvents.push({ model: event.model, inputTokens: event.inputTokens });
+        return { cost: 42 };
+      },
+    },
   });
   await db.insert(user).values({ id: userId, name: "Test", email: `${userId}@example.com` });
 });
@@ -149,6 +160,8 @@ beforeEach(async () => {
   await redis.flushdb();
   upstreamCalls = 0;
   upstreamDelayMs = 0;
+  seenEvents = [];
+  refuseNext = false;
 });
 
 afterAll(async () => {
@@ -182,12 +195,19 @@ describe("POST /v1/systemone", () => {
     expect(upstreamCalls).toBe(0);
   });
 
-  it("refuses with an empty balance", async () => {
+  it("lets a beforeUpstream hook refuse a request, and adds onUsage fields to the usage", async () => {
     const { key } = await newKey();
-    expect((await post(key, body())).status).toBe(402);
+    refuseNext = true;
+    const refused = await post(key, body(), hooked);
+    refuseNext = false;
+    expect(refused.status).toBe(402);
+    expect(((await refused.json()) as { error: { code: string } }).error.code).toBe("insufficient_credits");
     expect(upstreamCalls).toBe(0);
+    const ok = await post(key, body(), hooked);
+    expect(ok.status).toBe(200);
+    expect(((await ok.json()) as { usage: Record<string, number> }).usage).toMatchObject({ input_tokens: 300, cost: 42 });
+    expect(seenEvents).toEqual([{ model: "basal-1.5", inputTokens: 300 }]);
   });
-
   it("calls a configured path and model, and maps the server's 529 to 503", async () => {
     const { key } = await newKey();
     const res = await post(key, { ...body(), model: "basal-1.5" }, rs);
@@ -199,20 +219,16 @@ describe("POST /v1/systemone", () => {
     expect(busy.headers.get("retry-after")).toBe("1");
   });
 
-  it("routes by model: default model, own pricing, unpriced models free, unknown ones listed", async () => {
+  it("routes by model: the default without a model field, unknown models listed", async () => {
     const { key } = await newKey();
-    type Out = { model: string; usage: { cost_micro_usd: number } };
-    const byDefault = (await (await post(key, body(), rs)).json()) as Out;
-    expect(byDefault).toMatchObject({ model: "basal-1.5-max", usage: { cost_micro_usd: 100 } }); // 100 tokens at $1/1M
-    const listed = (await (await post(key, { ...body(), model: "basal-1.5" }, rs)).json()) as Out;
-    expect(listed.usage.cost_micro_usd).toBe(25); // 100 tokens + 1 branch at the default basal-1.5 price
-    const free = (await (await post(key, { ...body(), model: "my-finetune" }, rs)).json()) as Out;
-    expect(free.usage.cost_micro_usd).toBe(0);
+    const byDefault = (await (await post(key, body(), rs)).json()) as { model: string };
+    expect(byDefault.model).toBe("basal-1.5-max");
+    const named = (await (await post(key, { ...body(), model: "basal-1.5" }, rs)).json()) as { model: string };
+    expect(named.model).toBe("basal-1.5");
     const unknown = await post(key, { ...body(), model: "nope" }, rs);
     expect(unknown.status).toBe(404);
     expect(((await unknown.json()) as { error: { message: string } }).error.message).toContain("basal-1.5, basal-1.5-max");
   });
-
   it("completes the usage of a basal-1.0 server from the request", async () => {
     const { key } = await newKey();
     const res = await post(
@@ -233,64 +249,40 @@ describe("POST /v1/systemone", () => {
     expect(usage.latency_ms).toBeGreaterThanOrEqual(0);
   });
 
-  it("lists models with the default and prices", async () => {
+  it("lists models with the default", async () => {
     const res = await rs.request("/v1/models");
     expect(await res.json()).toEqual({
       default: "basal-1.5-max",
       models: [
-        {
-          name: "basal-1.5",
-          default: false,
-          pricing: { unit: "micro_usd", per_million_input_tokens: 50_000, per_thousand_branches: 20_000 },
-        },
-        {
-          name: "basal-1.5-max",
-          default: true,
-          pricing: { unit: "micro_usd", per_million_input_tokens: 1_000_000, per_thousand_branches: 0 },
-        },
-        { name: "my-finetune", default: false, pricing: null },
+        { name: "basal-1.5", default: false },
+        { name: "basal-1.5-max", default: true },
       ],
     });
   });
-
-  it("serves and meters an empty balance when credits are not required", async () => {
-    const { key } = await newKey();
-    const res = await post(key, body(), open);
-    expect(res.status).toBe(200);
-    expect(((await res.json()) as { usage: { cost_micro_usd: number } }).usage.cost_micro_usd).toBe(35);
-    expect(Number(await redis.get(balanceCacheKey(userId)))).toBe(-35); // still metered
-  });
-
-  it("proxies, bills from usage and records the event", async () => {
-    await db.insert(creditTransactions).values({ userId, amountMicroUsd: 1_000_000, reason: "signup" });
+  it("proxies and records the usage", async () => {
     const { key, id: keyId } = await newKey();
 
     const res = await post(key, { ...body(), model: "basal-1.5" });
     expect(res.status).toBe(200);
-    const json = (await res.json()) as { id: string; model: string; usage: { cost_micro_usd: number } };
+    const json = (await res.json()) as { id: string; model: string; usage: Record<string, number> };
     expect(json.model).toBe("basal-1.5");
-    expect(json.usage.cost_micro_usd).toBe(35); // 300 tokens + 1 branch at the default price
+    expect(json.usage).toEqual({ input_tokens: 300, output_tokens: 0, questions: 1, branches: 1, latency_ms: 12.5 });
     expect(res.headers.get("x-request-id")).toBe(json.id);
-    expect(Number(await redis.get(balanceCacheKey(userId)))).toBe(1_000_000 - 35);
 
     expect(await new UsageFlusher(db, redis).flush()).toBe(1);
     const [ev] = await db.select().from(usageEvents).where(eq(usageEvents.id, json.id));
-    expect(ev).toMatchObject({ userId, apiKeyId: keyId, model: "basal-1.5", inputTokens: 300, costMicroUsd: 35 });
+    expect(ev).toMatchObject({ userId, apiKeyId: keyId, model: "basal-1.5", inputTokens: 300, questions: 1, branches: 1 });
     const [k] = await db.select().from(apiKeys).where(eq(apiKeys.id, keyId));
     expect(k?.lastUsedAt).not.toBeNull();
   });
-
-  it("does not bill requests the model rejects", async () => {
+  it("does not record requests the model rejects", async () => {
     const { key } = await newKey();
-    await redis.set(balanceCacheKey(userId), 500);
     const res = await post(key, body("bad"));
     expect(res.status).toBe(422);
-    expect(await redis.get(balanceCacheKey(userId))).toBe("500");
+    expect(await redis.llen("usage:queue")).toBe(0);
   });
-
   it("enforces requests per minute", async () => {
     const { key } = await newKey({ rpmLimit: 2 });
-    await redis.set(balanceCacheKey(userId), 1_000);
     expect((await post(key, body())).status).toBe(200);
     expect((await post(key, body())).status).toBe(200);
     const res = await post(key, body());
@@ -299,7 +291,6 @@ describe("POST /v1/systemone", () => {
   });
 
   it("enforces requests per minute per account, over all its keys", async () => {
-    await redis.set(balanceCacheKey(userId), 1_000);
     const a = await newKey();
     const b = await newKey();
     const statuses = [];
@@ -311,7 +302,6 @@ describe("POST /v1/systemone", () => {
   });
 
   it("enforces concurrency per account and frees the slots afterwards", async () => {
-    await redis.set(balanceCacheKey(userId), 1_000);
     upstreamDelayMs = 300;
     const a = await newKey();
     const b = await newKey();
@@ -323,7 +313,6 @@ describe("POST /v1/systemone", () => {
   });
 
   it("caps requests per account per day", async () => {
-    await redis.set(balanceCacheKey(userId), 1_000);
     const a = await newKey();
     const b = await newKey();
     expect((await post(a.key, body(), daily)).status).toBe(200);
@@ -338,7 +327,6 @@ describe("POST /v1/systemone", () => {
   });
 
   it("enforces per-key concurrency and upstream capacity", async () => {
-    await redis.set(balanceCacheKey(userId), 1_000);
     upstreamDelayMs = 300;
     const a = await newKey({ concurrencyLimit: 1 });
     const [first, second] = await Promise.all([post(a.key, body()), post(a.key, body())]);
@@ -355,9 +343,7 @@ describe("POST /v1/systemone", () => {
     await db.insert(user).values({ id: other, name: "Gone", email: `${other}@example.com` });
     const k = generateApiKey();
     await db.insert(apiKeys).values({ userId: other, name: "gone", hash: k.hash, prefix: k.prefix });
-    await redis.set(balanceCacheKey(other), 1_000);
     expect((await post(k.key, body())).status).toBe(200);
-    await redis.set(balanceCacheKey(userId), 1_000);
     const { key } = await newKey();
     const ok = await post(key, body());
     expect(ok.status).toBe(200);
@@ -371,7 +357,6 @@ describe("POST /v1/systemone", () => {
 
   it("stops accepting a revoked key once its cache entry is gone", async () => {
     const { key, id } = await newKey();
-    await redis.set(balanceCacheKey(userId), 1_000);
     expect((await post(key, body())).status).toBe(200);
     await db.update(apiKeys).set({ revokedAt: new Date() }).where(eq(apiKeys.id, id));
     await redis.flushdb(); // the web app deletes the apikey:<hash> entry on revoke

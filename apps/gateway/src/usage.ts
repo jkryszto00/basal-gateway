@@ -1,5 +1,4 @@
-import { apiKeys, balanceMicroUsd, type Db, inArray, sql, usageEvents, user } from "@basal/db";
-import { balanceCacheKey } from "@basal/shared/keys";
+import { apiKeys, type Db, inArray, sql, usageEvents, user } from "@basal/db";
 import type { Redis } from "ioredis";
 
 export type UsageEvent = {
@@ -10,7 +9,6 @@ export type UsageEvent = {
   inputTokens: number;
   questions: number;
   branches: number;
-  costMicroUsd: number;
   upstreamLatencyMs: number;
   totalLatencyMs: number;
   createdAt: string;
@@ -18,26 +16,9 @@ export type UsageEvent = {
 
 const QUEUE = "usage:queue";
 
-/**
- * Hot balance in Redis (micro-USD). Postgres is the source of truth (credits - usage); Redis is seeded from it on a
- * miss and then moves with every charge, so the request path never sums the ledger.
- */
-export async function getBalance(db: Db, redis: Redis, userId: string): Promise<number> {
-  const key = balanceCacheKey(userId);
-  const cached = await redis.get(key);
-  if (cached !== null) return Number(cached);
-  await redis.set(key, await balanceMicroUsd(db, userId), "NX"); // NX: a concurrent seed or charge wins
-  return Number(await redis.get(key));
-}
-
-/** Debit the hot balance and queue the event for Postgres. Requests are short, so a balance > 0 check before the
- * call plus settlement after it can overdraw by at most one in-flight batch per user. */
-export async function charge(redis: Redis, event: UsageEvent): Promise<void> {
-  await redis
-    .multi()
-    .decrby(balanceCacheKey(event.userId), event.costMicroUsd)
-    .rpush(QUEUE, JSON.stringify(event))
-    .exec();
+/** Queue a successful request's usage; UsageFlusher writes it to Postgres in batches, off the request path. */
+export async function recordUsage(redis: Redis, event: UsageEvent): Promise<void> {
+  await redis.rpush(QUEUE, JSON.stringify(event));
 }
 
 /** Moves queued usage events to Postgres in batches. Insert is idempotent on the request id. */

@@ -1,7 +1,7 @@
 import { createDb } from "@basal/db";
 import { Redis } from "ioredis";
 import { createApp } from "./app";
-import { UsageFlusher } from "./billing";
+import { UsageFlusher } from "./usage";
 import { loadEnv } from "./env";
 import { createUpstreams } from "./upstream";
 
@@ -22,7 +22,6 @@ const app = createApp({
   redis,
   upstreams,
   userLimits,
-  requireCredits: env.CREDITS_ENABLED,
   defaultModel: env.DEFAULT_MODEL,
 });
 const server = Bun.serve({ fetch: app.fetch, port: env.GATEWAY_PORT });
