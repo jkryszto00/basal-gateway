@@ -1,21 +1,22 @@
 import { formatUsd } from "@basal/shared";
 import Link from "next/link";
-import { CopyButton } from "@/components/copy-button";
+import { QuickStart } from "@/components/quick-start";
 import { Card, Stat } from "@/components/ui";
 import { getBalance, usageSummary } from "@/lib/data";
+import { listModels, type ModelInfo } from "@/lib/models";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8787";
 // the gateway reads the same variable: with credits off a zero balance does not stop requests
 const CREDITS = ["true", "1", "yes", "on"].includes((process.env.CREDITS_ENABLED ?? "").toLowerCase());
 
 export default async function Overview({ searchParams }: PageProps<"/dashboard">) {
-  const [{ welcome }, balance, usage] = await Promise.all([searchParams, getBalance(), usageSummary(30)]);
-  const curl = `curl ${API_URL}/v1/systemone \\
-  -H "Authorization: Bearer $BASAL_KEY" \\
-  -H "Content-Type: application/json" \\
-  -d '{"state": "Zamówienie #1042 dotarło uszkodzone, proszę o zwrot pieniędzy.",
-       "questions": {"intent": {"type": "choice", "instructions": "Czego chce klient?",
-         "criteria": {"refund": "Zwrot pieniędzy", "replace": "Wymiana towaru", "info": "Informacja"}}}}'`;
+  const [{ welcome }, balance, usage, models] = await Promise.all([
+    searchParams,
+    getBalance(),
+    usageSummary(30),
+    listModels(),
+  ]);
+  const defaultModel = models?.find((m) => m.default)?.name;
 
   return (
     <div className="space-y-8">
@@ -58,20 +59,15 @@ export default async function Overview({ searchParams }: PageProps<"/dashboard">
       </div>
 
       <Card className="p-5">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h2 className="font-semibold">Quick start</h2>
-            <p className="mt-1 text-sm text-muted">
-              Create a key on the{" "}
-              <Link href="/dashboard/keys" className="text-fg underline underline-offset-4">
-                API keys
-              </Link>{" "}
-              page, export it as <code className="font-mono">BASAL_KEY</code> and send a decision.
-            </p>
-          </div>
-          <CopyButton text={curl} />
-        </div>
-        <pre className="mt-4 overflow-x-auto rounded-md bg-bg p-4 font-mono text-xs leading-relaxed">{curl}</pre>
+        <h2 className="font-semibold">Quick start</h2>
+        <p className="mt-1 text-sm text-muted">
+          Create a key on the{" "}
+          <Link href="/dashboard/keys" className="text-fg underline underline-offset-4">
+            API keys
+          </Link>{" "}
+          page, export it as <code className="font-mono">BASAL_KEY</code> and send a decision.
+        </p>
+        <QuickStart apiUrl={API_URL} models={models?.map((m) => m.name) ?? []} defaultModel={defaultModel} />
         <p className="mt-3 text-xs text-muted">
           The first request after a quiet period can take longer while the model starts. Question types, options and the
           response format follow the{" "}
@@ -81,6 +77,60 @@ export default async function Overview({ searchParams }: PageProps<"/dashboard">
           .
         </p>
       </Card>
+
+      <Models models={models} />
     </div>
+  );
+}
+
+const price = (micro: number) => `$${(micro / 1_000_000).toFixed(micro % 10_000 === 0 ? 2 : 4)}`;
+
+function Models({ models }: { models: ModelInfo[] | null }) {
+  return (
+    <Card className="overflow-x-auto">
+      <div className="px-5 pt-5">
+        <h2 className="font-semibold">Models</h2>
+        <p className="mt-1 text-sm text-muted">
+          Pick one with <code className="font-mono">&quot;model&quot;</code> in the request; without it the default
+          model answers. A branch is one question, or one label of a <code className="font-mono">multi</code> question.
+          Only successful requests are billed.
+        </p>
+      </div>
+      {models === null ? (
+        <p className="px-5 py-4 text-sm text-danger">The gateway at {API_URL} cannot be reached.</p>
+      ) : (
+        <table className="mt-3 w-full text-sm">
+          <thead className="text-left text-xs text-muted">
+            <tr className="border-b border-line">
+              <th className="px-5 py-2 font-medium">Model</th>
+              <th className="px-5 py-2 text-right font-medium">Per 1M input tokens</th>
+              <th className="px-5 py-2 text-right font-medium">Per 1k branches</th>
+            </tr>
+          </thead>
+          <tbody>
+            {models.map((m) => (
+              <tr key={m.name} className="border-b border-line last:border-0">
+                <td className="px-5 py-2 font-mono text-xs">
+                  {m.name}
+                  {m.default && (
+                    <span className="ml-2 rounded bg-accent/10 px-1.5 py-0.5 font-sans text-accent">default</span>
+                  )}
+                </td>
+                {m.pricing ? (
+                  <>
+                    <td className="px-5 py-2 text-right tabular-nums">{price(m.pricing.per_million_input_tokens)}</td>
+                    <td className="px-5 py-2 text-right tabular-nums">{price(m.pricing.per_thousand_branches)}</td>
+                  </>
+                ) : (
+                  <td colSpan={2} className="px-5 py-2 text-right text-muted">
+                    free
+                  </td>
+                )}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </Card>
   );
 }

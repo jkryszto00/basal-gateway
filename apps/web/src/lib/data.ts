@@ -53,6 +53,25 @@ export async function usageSummary(days = 30) {
   };
 }
 
+/** Requests, decisions, tokens and cost per model over the last `days`, most used first. */
+export async function usageByModel(days = 30) {
+  const user = await requireUser();
+  const since = new Date(Date.now() - days * 86_400_000);
+  const rows = await db
+    .select({
+      model: usageEvents.model,
+      requests: sql<number>`count(*)::int`,
+      decisions: sql<number>`coalesce(sum(${usageEvents.questions}), 0)::int`,
+      inputTokens: sql<number>`coalesce(sum(${usageEvents.inputTokens}), 0)::bigint`,
+      cost: sql<number>`coalesce(sum(${usageEvents.costMicroUsd}), 0)::bigint`,
+    })
+    .from(usageEvents)
+    .where(and(eq(usageEvents.userId, user.id), gte(usageEvents.createdAt, since)))
+    .groupBy(usageEvents.model)
+    .orderBy(desc(sql`count(*)`));
+  return rows.map((r) => ({ ...r, inputTokens: Number(r.inputTokens), cost: Number(r.cost) }));
+}
+
 export async function recentUsage(limit = 100) {
   const user = await requireUser();
   return db

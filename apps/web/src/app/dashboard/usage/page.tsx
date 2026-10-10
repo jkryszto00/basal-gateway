@@ -1,15 +1,50 @@
 import { formatUsd } from "@basal/shared";
 import { Card } from "@/components/ui";
-import { recentUsage } from "@/lib/data";
+import { recentUsage, usageByModel } from "@/lib/data";
 
 export default async function UsagePage() {
-  const rows = await recentUsage(100);
+  const [byModel, rows] = await Promise.all([usageByModel(30), recentUsage(100)]);
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-xl font-semibold">Usage</h1>
-        <p className="text-sm text-muted">Last 100 billed requests. Rejected and failed requests are not billed.</p>
+        <p className="text-sm text-muted">Rejected and failed requests are not billed.</p>
       </div>
+
+      <Card className="overflow-x-auto">
+        <h2 className="px-4 pt-4 text-sm font-semibold">By model, last 30 days</h2>
+        <table className="mt-2 w-full text-sm">
+          <thead className="text-left text-xs text-muted">
+            <tr className="border-b border-line">
+              <th className="px-4 py-2 font-medium">Model</th>
+              <th className="px-4 py-2 text-right font-medium">Requests</th>
+              <th className="px-4 py-2 text-right font-medium">Decisions</th>
+              <th className="px-4 py-2 text-right font-medium">Input tokens</th>
+              <th className="px-4 py-2 text-right font-medium">Cost</th>
+            </tr>
+          </thead>
+          <tbody className="font-mono text-xs">
+            {byModel.length === 0 && (
+              <tr>
+                <td colSpan={5} className="px-4 py-6 text-center font-sans text-sm text-muted">
+                  No requests in the last 30 days.
+                </td>
+              </tr>
+            )}
+            {byModel.map((m) => (
+              <tr key={m.model} className="border-b border-line last:border-0">
+                <td className="px-4 py-2">{m.model}</td>
+                <td className="px-4 py-2 text-right tabular-nums">{m.requests.toLocaleString("en")}</td>
+                <td className="px-4 py-2 text-right tabular-nums">{m.decisions.toLocaleString("en")}</td>
+                <td className="px-4 py-2 text-right tabular-nums">{m.inputTokens.toLocaleString("en")}</td>
+                <td className="px-4 py-2 text-right tabular-nums">{formatUsd(m.cost, 6)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </Card>
+
+      <h2 className="text-sm font-semibold">Last 100 requests</h2>
       <Card className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="text-left text-xs text-muted">
