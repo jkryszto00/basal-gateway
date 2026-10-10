@@ -1,4 +1,3 @@
-import { eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import * as schema from "./schema";
@@ -15,16 +14,3 @@ export function createDb(url = process.env.DATABASE_URL) {
 }
 
 export type Db = ReturnType<typeof createDb>;
-
-/** Balance in micro-USD from the source of truth: credits minus billed usage. */
-export async function balanceMicroUsd(db: Db, userId: string): Promise<number> {
-  const [credits] = await db
-    .select({ v: sql<string>`coalesce(sum(${schema.creditTransactions.amountMicroUsd}), 0)` })
-    .from(schema.creditTransactions)
-    .where(eq(schema.creditTransactions.userId, userId));
-  const [usage] = await db
-    .select({ v: sql<string>`coalesce(sum(${schema.usageEvents.costMicroUsd}), 0)` })
-    .from(schema.usageEvents)
-    .where(eq(schema.usageEvents.userId, userId));
-  return Number(credits?.v ?? 0) - Number(usage?.v ?? 0);
-}

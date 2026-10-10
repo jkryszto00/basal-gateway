@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { completeUsage, costMicroUsd, countBranches, DEFAULT_PRICES, decisionRequest, FREE } from "./index";
+import { completeUsage, countBranches, decisionRequest } from "./index";
 import { generateApiKey, hashApiKey, looksLikeApiKey } from "./keys";
 
 const ok = {
@@ -33,15 +33,6 @@ describe("decisionRequest", () => {
     expect(decisionRequest.safeParse({ questions: ok.questions }).success).toBe(false);
     expect(decisionRequest.safeParse({ state: "x", questions: {} }).success).toBe(false);
     expect(decisionRequest.safeParse({ ...ok, state: "x".repeat(40_000) }).success).toBe(false);
-  });
-});
-
-describe("pricing", () => {
-  it("charges input tokens and branches in micro-USD, rounded up", () => {
-    expect(costMicroUsd(DEFAULT_PRICES["basal-1.5"]!, { input_tokens: 300, branches: 1 })).toBe(35);
-    expect(costMicroUsd(DEFAULT_PRICES["basal-1.5"]!, { input_tokens: 1, branches: 0 })).toBe(1);
-    expect(costMicroUsd(DEFAULT_PRICES["basal-1.5"]!, { input_tokens: 0, branches: 0 })).toBe(0);
-    expect(costMicroUsd(FREE, { input_tokens: 5_000, branches: 9 })).toBe(0);
   });
 });
 

@@ -1,4 +1,4 @@
-import { bigint, boolean, index, integer, pgTable, real, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { boolean, index, integer, pgTable, real, text, timestamp, uuid } from "drizzle-orm/pg-core";
 
 // --- Better Auth core tables (user, session, account, verification) ---------------------------------------------
 
@@ -81,22 +81,7 @@ export const apiKeys = pgTable(
   (t) => [index("api_keys_user_id_idx").on(t.userId)],
 );
 
-/** Append-only credit ledger: top-ups, grants, refunds (positive), manual adjustments (either sign). */
-export const creditTransactions = pgTable(
-  "credit_transactions",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    userId: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
-    amountMicroUsd: bigint("amount_micro_usd", { mode: "number" }).notNull(),
-    reason: text("reason").notNull(), // signup | topup | refund | adjustment
-    /** idempotency key of the source (Stripe event id, ...) */
-    externalId: text("external_id").unique(),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (t) => [index("credit_transactions_user_id_idx").on(t.userId)],
-);
-
-/** One row per billed request; its cost is the debit side of the balance (balance = credits - usage). */
+/** One row per successful request: the usage record the dashboard and exports are built from. */
 export const usageEvents = pgTable(
   "usage_events",
   {
@@ -107,7 +92,6 @@ export const usageEvents = pgTable(
     inputTokens: integer("input_tokens").notNull(),
     questions: integer("questions").notNull(),
     branches: integer("branches").notNull(),
-    costMicroUsd: bigint("cost_micro_usd", { mode: "number" }).notNull(),
     upstreamLatencyMs: real("upstream_latency_ms").notNull(),
     totalLatencyMs: real("total_latency_ms").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

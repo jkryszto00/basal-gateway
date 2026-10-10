@@ -18,5 +18,3 @@ export function looksLikeApiKey(key: string): boolean {
 
 /** Redis key of the gateway's API key cache; the web app deletes it when a key is revoked. */
 export const apiKeyCacheKey = (hash: string) => `apikey:${hash}`;
-/** Redis key of a user's hot balance (micro-USD). */
-export const balanceCacheKey = (userId: string) => `balance:${userId}`;
