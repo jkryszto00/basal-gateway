@@ -3,6 +3,7 @@ import { signUp } from "@/app/actions";
 import { AuthForm } from "@/components/auth-form";
 import { OAuthButtons } from "@/components/oauth-buttons";
 import { OAUTH_PROVIDERS } from "@/lib/auth";
+import { EMAIL_VERIFICATION } from "@/lib/email";
 import { SIGNUP_DOMAINS, SIGNUP_OPEN } from "@/lib/signup";
 import { TURNSTILE_SITE_KEY } from "@/lib/turnstile";
 
@@ -21,8 +22,8 @@ export default function SignupPage() {
     <>
       <h1 className="text-lg font-semibold">Create an account</h1>
       <p className="mb-6 mt-1 text-sm text-muted">
-        {SIGNUP_DOMAINS.length ? `For addresses at ${SIGNUP_DOMAINS.join(", ")}. ` : ""}You will get API keys once you
-        confirm your email.
+        {SIGNUP_DOMAINS.length ? `For addresses at ${SIGNUP_DOMAINS.join(", ")}. ` : ""}
+        {EMAIL_VERIFICATION ? "You will get API keys once you confirm your email." : "Then create API keys."}
       </p>
       <AuthForm
         mode="signup"
