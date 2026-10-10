@@ -2,6 +2,7 @@ import "server-only";
 import { apiKeys, eq, schema } from "@basal/db";
 import { apiKeyCacheKey } from "@basal/shared/keys";
 import { betterAuth } from "better-auth";
+import { APIError } from "better-auth/api";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { nextCookies } from "better-auth/next-js";
 import { haveIBeenPwned } from "better-auth/plugins";
@@ -11,6 +12,7 @@ import { db } from "./db";
 import { resetPasswordEmail, trySendEmail, verificationEmail } from "./email";
 import { PASSWORD } from "./password";
 import { redis } from "./redis";
+import { SIGNUP_OPEN, signupAllowed } from "./signup";
 
 // GitHub and Google sign in, each enabled when its OAuth app is configured. Callback URLs to register with them:
 // <BETTER_AUTH_URL>/api/auth/callback/github and <BETTER_AUTH_URL>/api/auth/callback/google
@@ -22,6 +24,7 @@ const socialProviders = {
         clientId: env.GITHUB_CLIENT_ID,
         clientSecret: env.GITHUB_CLIENT_SECRET,
         requireEmailVerification: true,
+        disableSignUp: !SIGNUP_OPEN, // existing accounts can still sign in
       },
     }),
   ...(env.GOOGLE_CLIENT_ID &&
@@ -31,6 +34,7 @@ const socialProviders = {
         clientSecret: env.GOOGLE_CLIENT_SECRET,
         prompt: "select_account" as const,
         requireEmailVerification: true,
+        disableSignUp: !SIGNUP_OPEN,
       },
     }),
 };
@@ -62,6 +66,17 @@ export const auth = betterAuth({
   // A provider's verified email signs into the account with that email only if it is confirmed here too
   // (requireLocalEmailVerified, the default): registering someone's address first cannot capture their account.
   socialProviders,
+  databaseHooks: {
+    user: {
+      create: {
+        // every way in (email, GitHub, Google) creates the user here; the admin CLI writes to the database directly
+        before: async (user) => {
+          if (!signupAllowed(user.email))
+            throw new APIError("FORBIDDEN", { code: "SIGNUP_NOT_ALLOWED", message: "Sign up is not allowed" });
+        },
+      },
+    },
+  },
   user: {
     deleteUser: {
       enabled: true,

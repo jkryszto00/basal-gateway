@@ -13,6 +13,7 @@ import { clientIp } from "@/lib/client-ip";
 import { signInMethods } from "@/lib/data";
 import { db } from "@/lib/db";
 import { PASSWORD } from "@/lib/password";
+import { SIGNUP_DOMAINS, signupAllowed } from "@/lib/signup";
 import { hit, tooMany } from "@/lib/rate-limit";
 import { redis } from "@/lib/redis";
 import { verifyTurnstile } from "@/lib/turnstile";
@@ -47,6 +48,13 @@ export async function signUp(_: FormState, form: FormData): Promise<FormState> {
     .safeParse(Object.fromEntries(form));
   const values = keep(form, "name", "email");
   if (!parsed.success) return { error: parsed.error.issues[0]?.message, values };
+  if (!signupAllowed(parsed.data.email))
+    return {
+      error: SIGNUP_DOMAINS.length
+        ? `Sign up is limited to addresses at ${SIGNUP_DOMAINS.join(", ")}.`
+        : "Sign up is closed. Ask an administrator for an account.",
+      values,
+    };
   const ip = await clientIp();
   const wait = await hit("signUp", { ip });
   if (wait) return { error: tooMany(wait), values };
@@ -64,7 +72,9 @@ export async function signUp(_: FormState, form: FormData): Promise<FormState> {
 }
 
 export async function signIn(_: FormState, form: FormData): Promise<FormState> {
-  const parsed = z.object({ email, password: z.string().min(1, "Enter your password") }).safeParse(Object.fromEntries(form));
+  const parsed = z
+    .object({ email, password: z.string().min(1, "Enter your password") })
+    .safeParse(Object.fromEntries(form));
   const values = keep(form, "email");
   if (!parsed.success) return { error: parsed.error.issues[0]?.message, values };
   const wait = await hit("signIn", { ip: await clientIp(), email: parsed.data.email });
@@ -86,7 +96,12 @@ export async function signInWith(provider: OAuthProvider) {
   if (!OAUTH_PROVIDERS.includes(provider)) redirect("/login");
   if (await hit("oauth", { ip: await clientIp() })) redirect("/login?error=rate_limited");
   const { url } = await auth.api.signInSocial({
-    body: { provider, callbackURL: "/dashboard", newUserCallbackURL: "/dashboard?welcome=1", errorCallbackURL: "/login" },
+    body: {
+      provider,
+      callbackURL: "/dashboard",
+      newUserCallbackURL: "/dashboard?welcome=1",
+      errorCallbackURL: "/login",
+    },
     headers: await headers(),
   });
   if (!url) redirect("/login?error=oauth");
@@ -99,7 +114,10 @@ export async function resendVerification(_: FormState, form: FormData): Promise<
   const wait = await hit("resendVerification", { ip: await clientIp(), email: parsed.data });
   if (wait) return { error: tooMany(wait), values: keep(form, "email") };
   // answers the same whether or not the address has an unconfirmed account
-  await auth.api.sendVerificationEmail({ body: { email: parsed.data, callbackURL: VERIFY_CALLBACK }, headers: await headers() });
+  await auth.api.sendVerificationEmail({
+    body: { email: parsed.data, callbackURL: VERIFY_CALLBACK },
+    headers: await headers(),
+  });
   return { notice: `If ${parsed.data} is waiting for confirmation, a new link is on its way.` };
 }
 
@@ -109,8 +127,13 @@ export async function requestPasswordReset(_: FormState, form: FormData): Promis
   const wait = await hit("passwordReset", { ip: await clientIp(), email: parsed.data });
   if (wait) return { error: tooMany(wait), values: keep(form, "email") };
   // answers the same whether or not the account exists
-  await auth.api.requestPasswordReset({ body: { email: parsed.data, redirectTo: "/reset-password" }, headers: await headers() });
-  return { notice: `If an account exists for ${parsed.data}, we sent it a link to choose a new password. The link expires in 1 hour.` };
+  await auth.api.requestPasswordReset({
+    body: { email: parsed.data, redirectTo: "/reset-password" },
+    headers: await headers(),
+  });
+  return {
+    notice: `If an account exists for ${parsed.data}, we sent it a link to choose a new password. The link expires in 1 hour.`,
+  };
 }
 
 export async function resetPassword(_: FormState, form: FormData): Promise<FormState> {
@@ -124,7 +147,10 @@ export async function resetPassword(_: FormState, form: FormData): Promise<FormS
   try {
     // checked here too: Better Auth uses up the token before hashing, so a refused password would burn the link
     if (await isPasswordCompromised(parsed.data.password)) return { error: PASSWORD_COMPROMISED };
-    await auth.api.resetPassword({ body: { token: parsed.data.token, newPassword: parsed.data.password }, headers: await headers() });
+    await auth.api.resetPassword({
+      body: { token: parsed.data.token, newPassword: parsed.data.password },
+      headers: await headers(),
+    });
   } catch (e) {
     if (!(e instanceof APIError)) throw e;
     return { error: passwordProblem(e) ?? "This link has expired or was already used. Ask for a new one." };
@@ -181,10 +207,13 @@ export async function setPassword(_: FormState, form: FormData): Promise<FormSta
 
 export async function deleteAccount(_: FormState, form: FormData): Promise<FormState> {
   const user = await requireUser();
-  const confirm = String(form.get("confirm") ?? "").trim().toLowerCase();
+  const confirm = String(form.get("confirm") ?? "")
+    .trim()
+    .toLowerCase();
   const pw = form.get("password");
   if (confirm !== user.email.toLowerCase()) return { error: "Type your email address exactly to confirm." };
-  if ((await signInMethods()).includes("credential") && !(typeof pw === "string" && pw)) return { error: "Enter your password." };
+  if ((await signInMethods()).includes("credential") && !(typeof pw === "string" && pw))
+    return { error: "Enter your password." };
   const wait = await hit("deleteAccount", { ip: await clientIp(), email: user.email });
   if (wait) return { error: tooMany(wait) };
   try {

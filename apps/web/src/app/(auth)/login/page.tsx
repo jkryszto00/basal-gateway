@@ -2,6 +2,7 @@ import { signIn } from "@/app/actions";
 import { AuthForm, FormMessage } from "@/components/auth-form";
 import { OAuthButtons } from "@/components/oauth-buttons";
 import { OAUTH_PROVIDERS } from "@/lib/auth";
+import { SIGNUP_OPEN } from "@/lib/signup";
 
 const NOTICES: Record<string, string> = {
   reset: "Your password was changed and other sessions were signed out. Sign in with the new password.",
@@ -17,6 +18,8 @@ const ERRORS: Record<string, string> = {
   email_not_found: "We could not read a verified email address from that account.",
   access_denied: "Sign in was cancelled.",
   rate_limited: "Too many attempts. Try again in a few minutes.",
+  signup_disabled: "There is no account for that address, and sign up is closed. Ask an administrator for one.",
+  SIGNUP_NOT_ALLOWED: "Accounts for that address are not allowed on this instance.",
 };
 
 export default async function LoginPage({ searchParams }: PageProps<"/login">) {
@@ -34,7 +37,12 @@ export default async function LoginPage({ searchParams }: PageProps<"/login">) {
           <FormMessage state={error ? { error } : { notice: NOTICES[notice!] }} />
         </div>
       )}
-      <AuthForm mode="login" oauth={<OAuthButtons providers={OAUTH_PROVIDERS} />} action={signIn} />
+      <AuthForm
+        mode="login"
+        oauth={<OAuthButtons providers={OAUTH_PROVIDERS} />}
+        action={signIn}
+        signupOpen={SIGNUP_OPEN}
+      />
     </>
   );
 }

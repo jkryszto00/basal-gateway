@@ -152,6 +152,8 @@ All settings are environment variables, read from `.env` at the repository root 
 | `USER_RPM_LIMIT`, `USER_CONCURRENCY_LIMIT` | `120`, `16` | per account over all its keys; each key also has its own limits (60/min, 8) |
 | `USER_DAILY_REQUESTS` | `0` | requests per UTC day per account, `0` = unlimited |
 | `APP_NAME` | `basal gateway` | shown in the dashboard and emails |
+| `SIGNUP_MODE` | `open` | `closed`: no new accounts (create them with the admin CLI); existing ones still sign in |
+| `SIGNUP_ALLOWED_DOMAINS` | | e.g. `acme.com,acme.pl`: only these email domains may sign up (email and OAuth) |
 | `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL` | | session secret and the dashboard's public URL |
 | `NEXT_PUBLIC_API_URL` | `http://localhost:8787` | gateway URL shown in the dashboard |
 | `GATEWAY_INTERNAL_URL` | `NEXT_PUBLIC_API_URL` | where the dashboard reaches the gateway for its model list |

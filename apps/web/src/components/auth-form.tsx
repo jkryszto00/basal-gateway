@@ -69,11 +69,13 @@ export function AuthForm({
   action,
   turnstileSiteKey,
   oauth,
+  signupOpen = true,
 }: {
   mode: "login" | "signup";
   action: Action;
   turnstileSiteKey?: string;
   oauth?: React.ReactNode; // GitHub / Google buttons, above the email form
+  signupOpen?: boolean; // the login page links to sign up only when it is open
 }) {
   const [state, formAction, pending] = useActionState(action, undefined);
   const signup = mode === "signup";
@@ -116,12 +118,14 @@ export function AuthForm({
         <Button type="submit" disabled={pending} className="w-full">
           {pending ? (signup ? "Creating account…" : "Signing in…") : signup ? "Create account" : "Sign in"}
         </Button>
-        <p className="text-center text-sm text-muted">
-          {signup ? "Have an account? " : "New here? "}
-          <Link href={signup ? "/login" : "/signup"} className="text-fg underline underline-offset-4">
-            {signup ? "Sign in" : "Create an account"}
-          </Link>
-        </p>
+        {(signup || signupOpen) && (
+          <p className="text-center text-sm text-muted">
+            {signup ? "Have an account? " : "New here? "}
+            <Link href={signup ? "/login" : "/signup"} className="text-fg underline underline-offset-4">
+              {signup ? "Sign in" : "Create an account"}
+            </Link>
+          </p>
+        )}
       </form>
     </>
   );
