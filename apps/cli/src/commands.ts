@@ -18,7 +18,7 @@ async function userByEmail({ db }: Ctx, email: string) {
 }
 
 export async function listUsers({ db }: Ctx) {
-  return db
+  const rows = await db
     .select({
       email: user.email,
       name: user.name,
@@ -26,10 +26,12 @@ export async function listUsers({ db }: Ctx) {
       created: user.createdAt,
       // correlated subqueries, qualified by hand: drizzle leaves columns unqualified inside sql``
       keys: sql<number>`(select count(*)::int from api_keys k where k.user_id = "user".id and k.revoked_at is null)`,
-      lastRequest: sql<Date | null>`(select max(u.created_at) from usage_events u where u.user_id = "user".id)`,
+      lastRequest: sql<string | null>`(select max(u.created_at) from usage_events u where u.user_id = "user".id)`,
     })
     .from(user)
     .orderBy(user.createdAt);
+  // raw sql`` values come back as text, unlike typed columns
+  return rows.map((r) => ({ ...r, lastRequest: r.lastRequest === null ? null : new Date(r.lastRequest) }));
 }
 
 /**

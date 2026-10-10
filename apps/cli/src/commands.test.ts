@@ -25,7 +25,8 @@ describe("admin commands", () => {
     const [acc] = await db.select().from(account).where(eq(account.userId, u!.id));
     expect(acc?.providerId).toBe("credential");
     expect(await verifyPassword({ hash: acc!.password!, password: password! })).toBe(true);
-    expect((await listUsers(ctx)).some((r) => r.email === email)).toBe(true);
+    const listed = (await listUsers(ctx)).find((r) => r.email === email);
+    expect(listed).toMatchObject({ verified: true, keys: 0, lastRequest: null });
   });
 
   it("refuses a taken address, a short password and a bad address", async () => {
@@ -61,6 +62,7 @@ describe("admin commands", () => {
     ]);
     const mine = (await usageReport(ctx, 1)).filter((r) => r.email === email);
     expect(mine).toEqual([{ email, model: "basal-1.5", requests: 2, decisions: 4, branches: 6, inputTokens: 150 }]);
+    expect((await listUsers(ctx)).find((r) => r.email === email)?.lastRequest).toBeInstanceOf(Date);
   });
 
   it("deletes an account with its keys and usage, and their cache entries", async () => {
