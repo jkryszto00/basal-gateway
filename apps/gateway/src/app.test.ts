@@ -86,6 +86,7 @@ beforeAll(async () => {
     }),
     userLimits: limits(),
     requireCredits: true,
+    defaultModel: "basal-1.5",
   });
   strict = createApp({
     db,
@@ -93,6 +94,7 @@ beforeAll(async () => {
     upstreams: createUpstreams({ "basal-1.5": { url, token: "upstream-secret", maxInFlight: 10, timeoutMs: 5_000 } }),
     userLimits: limits({ rpm: 3, concurrency: 1 }),
     requireCredits: true,
+    defaultModel: "basal-1.5",
   });
   daily = createApp({
     db,
@@ -100,6 +102,7 @@ beforeAll(async () => {
     upstreams: createUpstreams({ "basal-1.5": { url, token: "upstream-secret", maxInFlight: 10, timeoutMs: 5_000 } }),
     userLimits: limits({ dailyRequests: 2 }),
     requireCredits: true,
+    defaultModel: "basal-1.5",
   });
   open = createApp({
     db,
@@ -107,13 +110,19 @@ beforeAll(async () => {
     upstreams: createUpstreams({ "basal-1.5": { url, token: "upstream-secret", maxInFlight: 10, timeoutMs: 5_000 } }),
     userLimits: limits(),
     requireCredits: false,
+    defaultModel: "basal-1.5",
   });
   rs = createApp({
     db,
     redis,
-    upstreams: createUpstreams({ "basal-1.5": { url, path: "/v1/basal", model: "basal-1.5-max" } }), // public name -> server model
+    upstreams: createUpstreams({
+      "basal-1.5": { url, path: "/v1/basal", model: "basal-1.5-max" }, // public name -> server model
+      "basal-1.5-max": { url, path: "/v1/basal", model: "basal-1.5-max", pricing: { inputPerMTok: 1_000_000, perKBranch: 0 } },
+      "my-finetune": { url, path: "/v1/basal", model: "basal-1.5-max" }, // not in the price list: free
+    }),
     userLimits: limits(),
     requireCredits: false,
+    defaultModel: "basal-1.5-max",
   });
   await db.insert(user).values({ id: userId, name: "Test", email: `${userId}@example.com` });
 });
@@ -163,13 +172,47 @@ describe("POST /v1/systemone", () => {
 
   it("calls a configured path and model, and maps the server's 529 to 503", async () => {
     const { key } = await newKey();
-    const res = await post(key, body(), rs);
+    const res = await post(key, { ...body(), model: "basal-1.5" }, rs);
     expect(res.status).toBe(200);
     expect(((await res.json()) as { answers: { dept: { choice: string } } }).answers.dept.choice).toBe("cards");
-    const busy = await post(key, body("busy"), rs);
+    const busy = await post(key, { ...body("busy"), model: "basal-1.5" }, rs);
     expect(busy.status).toBe(503);
     expect(((await busy.json()) as { error: { code: string } }).error.code).toBe("overloaded");
     expect(busy.headers.get("retry-after")).toBe("1");
+  });
+
+  it("routes by model: default model, own pricing, unpriced models free, unknown ones listed", async () => {
+    const { key } = await newKey();
+    type Out = { model: string; usage: { cost_micro_usd: number } };
+    const byDefault = (await (await post(key, body(), rs)).json()) as Out;
+    expect(byDefault).toMatchObject({ model: "basal-1.5-max", usage: { cost_micro_usd: 100 } }); // 100 tokens at $1/1M
+    const listed = (await (await post(key, { ...body(), model: "basal-1.5" }, rs)).json()) as Out;
+    expect(listed.usage.cost_micro_usd).toBe(25); // 100 tokens + 1 branch at the default basal-1.5 price
+    const free = (await (await post(key, { ...body(), model: "my-finetune" }, rs)).json()) as Out;
+    expect(free.usage.cost_micro_usd).toBe(0);
+    const unknown = await post(key, { ...body(), model: "nope" }, rs);
+    expect(unknown.status).toBe(404);
+    expect(((await unknown.json()) as { error: { message: string } }).error.message).toContain("basal-1.5, basal-1.5-max");
+  });
+
+  it("lists models with the default and prices", async () => {
+    const res = await rs.request("/v1/models");
+    expect(await res.json()).toEqual({
+      default: "basal-1.5-max",
+      models: [
+        {
+          name: "basal-1.5",
+          default: false,
+          pricing: { unit: "micro_usd", per_million_input_tokens: 50_000, per_thousand_branches: 20_000 },
+        },
+        {
+          name: "basal-1.5-max",
+          default: true,
+          pricing: { unit: "micro_usd", per_million_input_tokens: 1_000_000, per_thousand_branches: 0 },
+        },
+        { name: "my-finetune", default: false, pricing: null },
+      ],
+    });
   });
 
   it("serves and meters an empty balance when credits are not required", async () => {

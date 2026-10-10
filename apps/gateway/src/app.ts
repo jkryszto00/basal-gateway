@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { Db } from "@basal/db";
-import { costMicroUsd, DEFAULT_MODEL, decisionRequest, decisionUsage, MODELS } from "@basal/shared";
+import { costMicroUsd, decisionRequest, decisionUsage } from "@basal/shared";
 import { type Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
@@ -26,6 +26,8 @@ export type Deps = {
   userLimits: UserLimits;
   /** refuse requests (402) when the account's balance is zero; usage and cost are recorded either way */
   requireCredits: boolean;
+  /** model of requests that name none */
+  defaultModel: string;
 };
 
 type ErrorCode =
@@ -50,7 +52,7 @@ export const MAX_BODY_BYTES = 256 * 1024;
 
 const upstreamResponse = z.looseObject({ answers: z.record(z.string(), z.unknown()), usage: decisionUsage });
 
-export function createApp({ db, redis, upstreams, userLimits, requireCredits }: Deps) {
+export function createApp({ db, redis, upstreams, userLimits, requireCredits, defaultModel }: Deps) {
   const app = new Hono();
 
   app.get("/health", (c) => c.json({ status: "ok" }));
@@ -65,9 +67,14 @@ export function createApp({ db, redis, upstreams, userLimits, requireCredits }: 
 
   app.get("/v1/models", (c) =>
     c.json({
-      models: [...upstreams.keys()].map((name) => ({
-        name,
-        pricing: MODELS[name] ?? null, // micro-USD per 1M input tokens and per 1k branches
+      default: defaultModel,
+      models: [...upstreams.values()].map((u) => ({
+        name: u.model,
+        default: u.model === defaultModel,
+        // micro-USD; null: served for free (usage is still recorded)
+        pricing: u.priced
+          ? { unit: "micro_usd", per_million_input_tokens: u.price.inputPerMTok, per_thousand_branches: u.price.perKBranch }
+          : null,
       })),
     }),
   );
@@ -87,11 +94,11 @@ export function createApp({ db, redis, upstreams, userLimits, requireCredits }: 
     }
     const parsed = decisionRequest.safeParse(raw);
     if (!parsed.success) return fail("invalid_request", "request does not match the schema", 422, z.treeifyError(parsed.error));
-    const { model = DEFAULT_MODEL, ...body } = parsed.data;
+    const { model = defaultModel, ...body } = parsed.data;
 
     const upstream = upstreams.get(model);
-    const price = MODELS[model];
-    if (!upstream || !price) return fail("unknown_model", `unknown model ${model}`, 404);
+    if (!upstream) return fail("unknown_model", `unknown model ${model}; available: ${[...upstreams.keys()].join(", ")}`, 404);
+    const price = upstream.price;
 
     const keyScope = `key:${key.keyId}` as const;
     const userScope = `user:${key.userId}` as const;

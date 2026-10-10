@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { costMicroUsd, decisionRequest, MODELS } from "./index";
+import { costMicroUsd, DEFAULT_PRICES, decisionRequest, FREE } from "./index";
 import { generateApiKey, hashApiKey, looksLikeApiKey } from "./keys";
 
 const ok = {
@@ -38,9 +38,10 @@ describe("decisionRequest", () => {
 
 describe("pricing", () => {
   it("charges input tokens and branches in micro-USD, rounded up", () => {
-    expect(costMicroUsd(MODELS["basal-1.5"]!, { input_tokens: 300, branches: 1 })).toBe(35);
-    expect(costMicroUsd(MODELS["basal-1.5"]!, { input_tokens: 1, branches: 0 })).toBe(1);
-    expect(costMicroUsd(MODELS["basal-1.5"]!, { input_tokens: 0, branches: 0 })).toBe(0);
+    expect(costMicroUsd(DEFAULT_PRICES["basal-1.5"]!, { input_tokens: 300, branches: 1 })).toBe(35);
+    expect(costMicroUsd(DEFAULT_PRICES["basal-1.5"]!, { input_tokens: 1, branches: 0 })).toBe(1);
+    expect(costMicroUsd(DEFAULT_PRICES["basal-1.5"]!, { input_tokens: 0, branches: 0 })).toBe(0);
+    expect(costMicroUsd(FREE, { input_tokens: 5_000, branches: 9 })).toBe(0);
   });
 });
 
