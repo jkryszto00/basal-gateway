@@ -5,7 +5,7 @@ import { betterAuth } from "better-auth";
 import { APIError } from "better-auth/api";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { nextCookies } from "better-auth/next-js";
-import { haveIBeenPwned } from "better-auth/plugins";
+import { haveIBeenPwned, isPasswordCompromised } from "better-auth/plugins";
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { db } from "./db";
@@ -40,6 +40,14 @@ const socialProviders = {
 };
 export const PASSWORD_COMPROMISED =
   "This password appeared in a data breach (haveibeenpwned.com). Choose a different one.";
+
+/** Breached-password check against haveibeenpwned.com; HIBP_ENABLED=false for installs without internet access. */
+export const HIBP_ENABLED = !["false", "0", "no", "off"].includes((process.env.HIBP_ENABLED ?? "true").toLowerCase());
+
+/** For the actions that set a password outside the plugin's paths (reset, set password); false when the check is off. */
+export async function passwordBreached(password: string): Promise<boolean> {
+  return HIBP_ENABLED && (await isPasswordCompromised(password));
+}
 
 export type OAuthProvider = "github" | "google";
 export const OAUTH_PROVIDERS = Object.keys(socialProviders) as OAuthProvider[];
@@ -94,10 +102,14 @@ export const auth = betterAuth({
   plugins: [
     // refuses new passwords found in breaches (k-anonymity: only 5 hex chars of the SHA-1 leave the server); fails
     // closed when the service is down. setPassword has no path, so its action checks itself.
-    haveIBeenPwned({
-      paths: ["/sign-up/email", "/change-password", "/reset-password"],
-      customPasswordCompromisedMessage: PASSWORD_COMPROMISED,
-    }),
+    ...(HIBP_ENABLED
+      ? [
+          haveIBeenPwned({
+            paths: ["/sign-up/email", "/change-password", "/reset-password"],
+            customPasswordCompromisedMessage: PASSWORD_COMPROMISED,
+          }),
+        ]
+      : []),
     nextCookies(), // lets server actions set the session cookie; stays last
   ],
 });
