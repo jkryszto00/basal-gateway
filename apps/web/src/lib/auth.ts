@@ -1,13 +1,12 @@
 import "server-only";
 import { apiKeys, eq, schema } from "@basal/db";
-import { apiKeyCacheKey, balanceCacheKey } from "@basal/shared/keys";
+import { apiKeyCacheKey } from "@basal/shared/keys";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { nextCookies } from "better-auth/next-js";
 import { haveIBeenPwned } from "better-auth/plugins";
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { grantSignupCredit } from "./credits";
 import { db } from "./db";
 import { resetPasswordEmail, trySendEmail, verificationEmail } from "./email";
 import { PASSWORD } from "./password";
@@ -19,7 +18,11 @@ const env = process.env;
 const socialProviders = {
   ...(env.GITHUB_CLIENT_ID &&
     env.GITHUB_CLIENT_SECRET && {
-      github: { clientId: env.GITHUB_CLIENT_ID, clientSecret: env.GITHUB_CLIENT_SECRET, requireEmailVerification: true },
+      github: {
+        clientId: env.GITHUB_CLIENT_ID,
+        clientSecret: env.GITHUB_CLIENT_SECRET,
+        requireEmailVerification: true,
+      },
     }),
   ...(env.GOOGLE_CLIENT_ID &&
     env.GOOGLE_CLIENT_SECRET && {
@@ -55,32 +58,18 @@ export const auth = betterAuth({
     expiresIn: 24 * 60 * 60,
     autoSignInAfterVerification: true,
     sendVerificationEmail: ({ user, url }) => trySendEmail(verificationEmail(user.email, url)),
-    // free credits to try the API, only for a confirmed address
-    afterEmailVerification: async (user) => {
-      await grantSignupCredit(user);
-    },
   },
   // A provider's verified email signs into the account with that email only if it is confirmed here too
   // (requireLocalEmailVerified, the default): registering someone's address first cannot capture their account.
   socialProviders,
-  databaseHooks: {
-    user: {
-      create: {
-        // GitHub / Google accounts arrive with the email already verified by the provider
-        after: async (user) => {
-          if (user.emailVerified) await grantSignupCredit(user);
-        },
-      },
-    },
-  },
   user: {
     deleteUser: {
       enabled: true,
-      // Postgres cascades keys, credits and usage; the gateway's Redis caches would keep the keys working for up to
-      // a minute, so they go first
+      // Postgres cascades keys and usage; the gateway's Redis cache would keep the keys working for up to a minute,
+      // so it goes first
       beforeDelete: async (user) => {
         const keys = await db.select({ hash: apiKeys.hash }).from(apiKeys).where(eq(apiKeys.userId, user.id));
-        await redis.del(balanceCacheKey(user.id), ...keys.map((k) => apiKeyCacheKey(k.hash)));
+        if (keys.length) await redis.del(...keys.map((k) => apiKeyCacheKey(k.hash)));
       },
     },
   },

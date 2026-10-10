@@ -8,7 +8,7 @@ export default function SignupPage() {
   return (
     <>
       <h1 className="text-lg font-semibold">Create an account</h1>
-      <p className="mb-6 mt-1 text-sm text-muted">Free credits to try the API once you confirm your email.</p>
+      <p className="mb-6 mt-1 text-sm text-muted">You will get API keys once you confirm your email.</p>
       <AuthForm
         mode="signup"
         oauth={<OAuthButtons providers={OAUTH_PROVIDERS} />}

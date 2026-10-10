@@ -86,11 +86,7 @@ step("signup with a taken email looks the same");
 await page.goto(verifyLink);
 await page.waitForURL(`${base}/dashboard?welcome=1`);
 if (!(await status()).includes("Your email is confirmed")) throw new Error("no welcome banner");
-const balanceStat = page.getByText("Balance", { exact: true }); // shown with CREDITS_ENABLED only
-const balance = (await balanceStat.count())
-  ? await balanceStat.locator("xpath=following-sibling::div[1]").textContent()
-  : "not shown (credits off)";
-step(`confirmation link -> signed in, balance ${balance}`);
+step("confirmation link -> signed in");
 
 await page.click("text=API keys");
 await page.waitForURL(`${base}/dashboard/keys`);

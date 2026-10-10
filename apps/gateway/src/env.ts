@@ -15,8 +15,6 @@ export const upstreamConfig = z.object({
   maxInFlight: z.number().int().positive().default(64),
   /** a scaled-to-zero Modal container needs time to restore its snapshot */
   timeoutMs: z.number().int().positive().default(180_000),
-  /** micro-USD per 1M input tokens and per 1k branches; default: the basal-1.5 price list by model name, else free */
-  pricing: z.object({ inputPerMTok: z.number().nonnegative(), perKBranch: z.number().nonnegative() }).optional(),
 });
 
 export type UpstreamConfig = z.infer<typeof upstreamConfig>;
@@ -28,8 +26,6 @@ const base = z.object({
   /** per account, over all its keys (each key also has its own, lower limits) */
   USER_RPM_LIMIT: z.coerce.number().int().positive().default(120),
   USER_CONCURRENCY_LIMIT: z.coerce.number().int().positive().default(16),
-  /** refuse requests at a zero balance (prepaid credits); off: usage and cost are only recorded */
-  CREDITS_ENABLED: z.stringbool().default(false),
   /** requests per UTC day per account; 0 means no daily limit */
   USER_DAILY_REQUESTS: z.coerce.number().int().nonnegative().default(0),
   /** model used when a request names none; default: the first model in UPSTREAMS */

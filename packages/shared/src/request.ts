@@ -5,7 +5,7 @@ export const LIMITS = {
   maxQuestions: 16,
   minOptions: 2,
   maxOptions: 10,
-  maxStateChars: 32_000, // ~8k tokens; long documents cost GPU time, raise per plan later
+  maxStateChars: 32_000, // ~8k tokens; long documents take GPU time
 } as const;
 
 export const QUESTION_TYPES = ["choice", "noul", "score", "multi", "act"] as const;

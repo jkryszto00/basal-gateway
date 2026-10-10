@@ -1,4 +1,3 @@
-import { formatUsd } from "@basal/shared";
 import { Card } from "@/components/ui";
 import { recentUsage, usageByModel } from "@/lib/data";
 
@@ -8,7 +7,7 @@ export default async function UsagePage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-xl font-semibold">Usage</h1>
-        <p className="text-sm text-muted">Rejected and failed requests are not billed.</p>
+        <p className="text-sm text-muted">Successful requests; rejected and failed ones are not recorded.</p>
       </div>
 
       <Card className="overflow-x-auto">
@@ -20,7 +19,7 @@ export default async function UsagePage() {
               <th className="px-4 py-2 text-right font-medium">Requests</th>
               <th className="px-4 py-2 text-right font-medium">Decisions</th>
               <th className="px-4 py-2 text-right font-medium">Input tokens</th>
-              <th className="px-4 py-2 text-right font-medium">Cost</th>
+              <th className="px-4 py-2 text-right font-medium">Latency p50</th>
             </tr>
           </thead>
           <tbody className="font-mono text-xs">
@@ -37,7 +36,9 @@ export default async function UsagePage() {
                 <td className="px-4 py-2 text-right tabular-nums">{m.requests.toLocaleString("en")}</td>
                 <td className="px-4 py-2 text-right tabular-nums">{m.decisions.toLocaleString("en")}</td>
                 <td className="px-4 py-2 text-right tabular-nums">{m.inputTokens.toLocaleString("en")}</td>
-                <td className="px-4 py-2 text-right tabular-nums">{formatUsd(m.cost, 6)}</td>
+                <td className="px-4 py-2 text-right tabular-nums">
+                  {m.p50 === null ? "–" : `${Math.round(m.p50)} ms`}
+                </td>
               </tr>
             ))}
           </tbody>
@@ -55,13 +56,12 @@ export default async function UsagePage() {
               <th className="px-4 py-2 text-right font-medium">Tokens</th>
               <th className="px-4 py-2 text-right font-medium">Questions</th>
               <th className="px-4 py-2 text-right font-medium">Latency</th>
-              <th className="px-4 py-2 text-right font-medium">Cost</th>
             </tr>
           </thead>
           <tbody className="font-mono text-xs">
             {rows.length === 0 && (
               <tr>
-                <td colSpan={7} className="px-4 py-8 text-center font-sans text-sm text-muted">
+                <td colSpan={6} className="px-4 py-8 text-center font-sans text-sm text-muted">
                   No requests yet.
                 </td>
               </tr>
@@ -74,7 +74,6 @@ export default async function UsagePage() {
                 <td className="px-4 py-2 text-right tabular-nums">{r.inputTokens}</td>
                 <td className="px-4 py-2 text-right tabular-nums">{r.questions}</td>
                 <td className="px-4 py-2 text-right tabular-nums">{Math.round(r.latency)} ms</td>
-                <td className="px-4 py-2 text-right tabular-nums">{formatUsd(r.cost, 6)}</td>
               </tr>
             ))}
           </tbody>

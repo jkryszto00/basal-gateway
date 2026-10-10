@@ -1,15 +1,15 @@
 import { randomUUID } from "node:crypto";
 import type { Db } from "@basal/db";
-import { completeUsage, costMicroUsd, decisionRequest, serverUsage } from "@basal/shared";
+import { completeUsage, decisionRequest, serverUsage } from "@basal/shared";
 import { type Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import type { Redis } from "ioredis";
 import { z } from "zod";
-import { resolveKey } from "./auth";
-import { charge, getBalance } from "./billing";
+import { type KeyInfo, resolveKey } from "./auth";
 import { acquireSlot, checkDaily, checkRate, releaseSlot } from "./limits";
 import type { Upstream } from "./upstream";
+import { recordUsage, type UsageEvent } from "./usage";
 
 /** Limits per account, summed over all its API keys (10 keys x 60 rpm would otherwise allow 600 rpm). */
 export type UserLimits = {
@@ -19,15 +19,31 @@ export type UserLimits = {
   dailyRequests: number;
 };
 
+/** What a hook knows about the request it runs for. */
+export type RequestContext = { requestId: string; key: KeyInfo; model: string };
+
+type MaybePromise<T> = T | Promise<T>;
+
+/**
+ * Extension points for builds on top of the gateway, e.g. a hosted service that sells prepaid credits: check a balance
+ * in beforeUpstream, price and charge the request in onUsage. Both run on the request path; keep them fast.
+ */
+export type GatewayHooks = {
+  /** After authentication, validation and the per-minute limits, before the inference server: return a Response
+   * (see apiError) to refuse the request. */
+  beforeUpstream?: (ctx: RequestContext) => MaybePromise<Response | undefined>;
+  /** After a successful decision, once its usage is queued: the returned fields are added to the response's usage. */
+  onUsage?: (ctx: RequestContext, event: UsageEvent) => MaybePromise<Record<string, unknown> | undefined>;
+};
+
 export type Deps = {
   db: Db;
   redis: Redis;
   upstreams: Map<string, Upstream>;
   userLimits: UserLimits;
-  /** refuse requests (402) when the account's balance is zero; usage and cost are recorded either way */
-  requireCredits: boolean;
   /** model of requests that name none */
   defaultModel: string;
+  hooks?: GatewayHooks;
 };
 
 type ErrorCode =
@@ -39,20 +55,23 @@ type ErrorCode =
   | "rate_limited"
   | "concurrency_limited"
   | "daily_limit_reached"
-  | "insufficient_credits"
   | "overloaded"
   | "upstream_error"
   | "upstream_timeout";
 
-const fail = (code: ErrorCode, message: string, status: ContentfulStatusCode, details?: unknown) =>
+/** The gateway's error body, `{"error": {"code", "message"}}`; for hooks that refuse a request. */
+export const apiError = (code: string, message: string, status: number, details?: unknown) =>
   Response.json({ error: { code, message, ...(details ? { details } : {}) } }, { status });
+
+const fail = (code: ErrorCode, message: string, status: ContentfulStatusCode, details?: unknown) =>
+  apiError(code, message, status, details);
 
 /** Rejected before parsing; a maximal valid request (32k-char state, 16 questions) is far below it. */
 export const MAX_BODY_BYTES = 256 * 1024;
 
 const upstreamResponse = z.looseObject({ answers: z.record(z.string(), z.unknown()), usage: serverUsage });
 
-export function createApp({ db, redis, upstreams, userLimits, requireCredits, defaultModel }: Deps) {
+export function createApp({ db, redis, upstreams, userLimits, defaultModel, hooks = {} }: Deps) {
   const app = new Hono();
 
   app.get("/health", (c) => c.json({ status: "ok" }));
@@ -71,10 +90,6 @@ export function createApp({ db, redis, upstreams, userLimits, requireCredits, de
       models: [...upstreams.values()].map((u) => ({
         name: u.model,
         default: u.model === defaultModel,
-        // micro-USD; null: served for free (usage is still recorded)
-        pricing: u.priced
-          ? { unit: "micro_usd", per_million_input_tokens: u.price.inputPerMTok, per_thousand_branches: u.price.perKBranch }
-          : null,
       })),
     }),
   );
@@ -98,7 +113,6 @@ export function createApp({ db, redis, upstreams, userLimits, requireCredits, de
 
     const upstream = upstreams.get(model);
     if (!upstream) return fail("unknown_model", `unknown model ${model}; available: ${[...upstreams.keys()].join(", ")}`, 404);
-    const price = upstream.price;
 
     const keyScope = `key:${key.keyId}` as const;
     const userScope = `user:${key.userId}` as const;
@@ -114,8 +128,9 @@ export function createApp({ db, redis, upstreams, userLimits, requireCredits, de
       }
     }
 
-    if (requireCredits && (await getBalance(db, redis, key.userId)) <= 0)
-      return fail("insufficient_credits", "balance is empty", 402);
+    const ctx: RequestContext = { requestId, key, model };
+    const refused = await hooks.beforeUpstream?.(ctx);
+    if (refused) return refused;
 
     if (userLimits.dailyRequests > 0) {
       const daily = await checkDaily(redis, key.userId, userLimits.dailyRequests);
@@ -170,9 +185,7 @@ export function createApp({ db, redis, upstreams, userLimits, requireCredits, de
 
       // basal-1.0 servers report only token counts: questions, branches and latency are filled in here
       const usage = completeUsage(out.data.usage, body, performance.now() - sentAt);
-      const cost = costMicroUsd(price, usage);
-      const totalMs = performance.now() - t0;
-      await charge(redis, {
+      const event: UsageEvent = {
         id: requestId,
         userId: key.userId,
         apiKeyId: key.keyId,
@@ -180,13 +193,14 @@ export function createApp({ db, redis, upstreams, userLimits, requireCredits, de
         inputTokens: usage.input_tokens,
         questions: usage.questions,
         branches: usage.branches,
-        costMicroUsd: cost,
         upstreamLatencyMs: usage.latency_ms,
-        totalLatencyMs: totalMs,
+        totalLatencyMs: performance.now() - t0,
         createdAt: new Date().toISOString(),
-      });
+      };
+      await recordUsage(redis, event);
+      const extra = await hooks.onUsage?.(ctx, event);
       return Response.json(
-        { id: requestId, ...out.data, model, usage: { ...usage, cost_micro_usd: cost } },
+        { id: requestId, ...out.data, model, usage: { ...usage, ...extra } },
         { headers: { "x-request-id": requestId } },
       );
     } finally {

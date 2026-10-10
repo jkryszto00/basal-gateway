@@ -6,7 +6,7 @@ import { OAUTH_PROVIDERS } from "@/lib/auth";
 const NOTICES: Record<string, string> = {
   reset: "Your password was changed and other sessions were signed out. Sign in with the new password.",
   verified: "Your email is confirmed. Sign in to continue.",
-  deleted: "Your account and its API keys, credits and usage history were deleted.",
+  deleted: "Your account, its API keys and its usage history were deleted.",
 };
 
 // ?error= from a GitHub / Google round trip (Better Auth's codes) or from signInWith

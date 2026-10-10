@@ -1,18 +1,9 @@
 import "server-only";
-import { account, and, apiKeys, balanceMicroUsd, desc, eq, gte, isNull, sql, usageEvents } from "@basal/db";
-import { balanceCacheKey } from "@basal/shared/keys";
+import { account, and, apiKeys, desc, eq, gte, isNull, sql, usageEvents } from "@basal/db";
 import { requireUser } from "./auth";
 import { db } from "./db";
-import { redis } from "./redis";
 
 // Every getter resolves the user itself, so no caller can ask for another user's data.
-
-export async function getBalance(): Promise<number> {
-  const user = await requireUser();
-  // the gateway's hot balance includes charges not yet flushed to Postgres
-  const hot = await redis.get(balanceCacheKey(user.id));
-  return hot !== null ? Number(hot) : balanceMicroUsd(db, user.id);
-}
 
 export async function listKeys() {
   const user = await requireUser();
@@ -39,7 +30,6 @@ export async function usageSummary(days = 30) {
       requests: sql<number>`count(*)::int`,
       decisions: sql<number>`coalesce(sum(${usageEvents.questions}), 0)::int`,
       inputTokens: sql<number>`coalesce(sum(${usageEvents.inputTokens}), 0)::bigint`,
-      cost: sql<number>`coalesce(sum(${usageEvents.costMicroUsd}), 0)::bigint`,
       p50: sql<number | null>`percentile_cont(0.5) within group (order by ${usageEvents.totalLatencyMs})`,
     })
     .from(usageEvents)
@@ -48,12 +38,11 @@ export async function usageSummary(days = 30) {
     requests: Number(row?.requests ?? 0),
     decisions: Number(row?.decisions ?? 0),
     inputTokens: Number(row?.inputTokens ?? 0),
-    cost: Number(row?.cost ?? 0),
     p50: row?.p50 === null || row?.p50 === undefined ? null : Number(row.p50),
   };
 }
 
-/** Requests, decisions, tokens and cost per model over the last `days`, most used first. */
+/** Requests, decisions, tokens and latency per model over the last `days`, most used first. */
 export async function usageByModel(days = 30) {
   const user = await requireUser();
   const since = new Date(Date.now() - days * 86_400_000);
@@ -63,13 +52,13 @@ export async function usageByModel(days = 30) {
       requests: sql<number>`count(*)::int`,
       decisions: sql<number>`coalesce(sum(${usageEvents.questions}), 0)::int`,
       inputTokens: sql<number>`coalesce(sum(${usageEvents.inputTokens}), 0)::bigint`,
-      cost: sql<number>`coalesce(sum(${usageEvents.costMicroUsd}), 0)::bigint`,
+      p50: sql<number | null>`percentile_cont(0.5) within group (order by ${usageEvents.totalLatencyMs})`,
     })
     .from(usageEvents)
     .where(and(eq(usageEvents.userId, user.id), gte(usageEvents.createdAt, since)))
     .groupBy(usageEvents.model)
     .orderBy(desc(sql`count(*)`));
-  return rows.map((r) => ({ ...r, inputTokens: Number(r.inputTokens), cost: Number(r.cost) }));
+  return rows.map((r) => ({ ...r, inputTokens: Number(r.inputTokens), p50: r.p50 === null ? null : Number(r.p50) }));
 }
 
 export async function recentUsage(limit = 100) {
@@ -82,7 +71,6 @@ export async function recentUsage(limit = 100) {
       inputTokens: usageEvents.inputTokens,
       questions: usageEvents.questions,
       branches: usageEvents.branches,
-      cost: usageEvents.costMicroUsd,
       latency: usageEvents.totalLatencyMs,
       createdAt: usageEvents.createdAt,
     })
