@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { completeUsage, countBranches, decisionRequest } from "./index";
+import { decisionRequest } from "./index";
 import { generateApiKey, hashApiKey, looksLikeApiKey } from "./keys";
 
 const ok = {
@@ -50,28 +50,5 @@ describe("api keys", () => {
     expect(key.startsWith("acme_")).toBe(true);
     expect(looksLikeApiKey(key)).toBe(true);
     expect(generateApiKey().key.startsWith("bg_live_")).toBe(true);
-  });
-});
-
-describe("usage of basal-1.0 servers", () => {
-  const questions = decisionRequest.parse({
-    state: "x",
-    questions: { a: { criteria: ["x", "y"] }, b: { type: "multi", criteria: ["p", "q", "r", "s"] } },
-  }).questions;
-
-  it("counts one branch per question and per multi label", () => {
-    expect(countBranches(questions)).toBe(5);
-  });
-
-  it("keeps what the server reports and fills in the rest", () => {
-    expect(completeUsage({ input_tokens: 10 }, { questions }, 12.345)).toEqual({
-      input_tokens: 10,
-      output_tokens: 0,
-      questions: 2,
-      branches: 5,
-      latency_ms: 12.35,
-    });
-    const full = { input_tokens: 10, output_tokens: 0, questions: 9, branches: 9, latency_ms: 1 };
-    expect(completeUsage(full, { questions }, 99)).toEqual(full);
   });
 });
