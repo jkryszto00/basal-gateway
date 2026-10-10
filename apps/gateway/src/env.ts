@@ -15,11 +15,13 @@ export const upstreamConfig = z.object({
   maxInFlight: z.number().int().positive().default(64),
   /** a scaled-to-zero Modal container needs time to restore its snapshot */
   timeoutMs: z.number().int().positive().default(180_000),
+  /** micro-USD per 1M input tokens and per 1k branches; default: the basal-1.5 price list by model name, else free */
+  pricing: z.object({ inputPerMTok: z.number().nonnegative(), perKBranch: z.number().nonnegative() }).optional(),
 });
 
 export type UpstreamConfig = z.infer<typeof upstreamConfig>;
 
-const schema = z.object({
+const base = z.object({
   DATABASE_URL: z.string().min(1),
   REDIS_URL: z.string().min(1),
   GATEWAY_PORT: z.coerce.number().int().default(8787),
@@ -30,6 +32,8 @@ const schema = z.object({
   CREDITS_ENABLED: z.stringbool().default(false),
   /** requests per UTC day per account; 0 means no daily limit */
   USER_DAILY_REQUESTS: z.coerce.number().int().nonnegative().default(0),
+  /** model used when a request names none; default: the first model in UPSTREAMS */
+  DEFAULT_MODEL: z.string().min(1).optional(),
   /** {"basal-1.5": {"url": "...", "token": "..."}}: public model name -> basal-serve or basal-rs upstream */
   UPSTREAMS: z
     .string()
@@ -43,6 +47,14 @@ const schema = z.object({
     })
     .pipe(z.record(z.string(), upstreamConfig)),
 });
+
+const schema = base
+  .refine((e) => Object.keys(e.UPSTREAMS).length > 0, { message: "UPSTREAMS has no models", path: ["UPSTREAMS"] })
+  .refine((e) => !e.DEFAULT_MODEL || e.DEFAULT_MODEL in e.UPSTREAMS, {
+    message: "DEFAULT_MODEL is not one of the models in UPSTREAMS",
+    path: ["DEFAULT_MODEL"],
+  })
+  .transform((e) => ({ ...e, DEFAULT_MODEL: e.DEFAULT_MODEL ?? Object.keys(e.UPSTREAMS)[0]! }));
 
 export type Env = z.infer<typeof schema>;
 

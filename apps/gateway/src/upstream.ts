@@ -1,3 +1,4 @@
+import { DEFAULT_PRICES, FREE, type ModelPrice } from "@basal/shared";
 import type { z } from "zod";
 import { type UpstreamConfig, upstreamConfig } from "./env";
 
@@ -9,11 +10,18 @@ export type UpstreamResult =
 /** One inference server speaking the basal API (basal-serve or basal-rs: own GPU, Modal, RunPod, ...). */
 export class Upstream {
   private inFlight = 0;
+  /** what a request to this model costs: its own pricing, else the default price list, else nothing */
+  readonly price: ModelPrice;
+  readonly priced: boolean;
 
   constructor(
     readonly model: string,
     private readonly cfg: UpstreamConfig,
-  ) {}
+  ) {
+    const price = cfg.pricing ?? DEFAULT_PRICES[model];
+    this.price = price ?? FREE;
+    this.priced = price !== undefined;
+  }
 
   /** In-process backpressure: basal-serve queues without limit, so the gateway refuses past maxInFlight. */
   tryAcquire(): boolean {

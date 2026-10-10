@@ -17,8 +17,16 @@ const userLimits = {
   concurrency: env.USER_CONCURRENCY_LIMIT,
   dailyRequests: env.USER_DAILY_REQUESTS,
 };
-const server = Bun.serve({ fetch: createApp({ db, redis, upstreams, userLimits, requireCredits: env.CREDITS_ENABLED }).fetch, port: env.GATEWAY_PORT });
-console.log(`gateway on :${server.port}, models: ${[...upstreams.keys()].join(", ")}`);
+const app = createApp({
+  db,
+  redis,
+  upstreams,
+  userLimits,
+  requireCredits: env.CREDITS_ENABLED,
+  defaultModel: env.DEFAULT_MODEL,
+});
+const server = Bun.serve({ fetch: app.fetch, port: env.GATEWAY_PORT });
+console.log(`gateway on :${server.port}, models: ${[...upstreams.keys()].join(", ")} (default ${env.DEFAULT_MODEL})`);
 
 async function shutdown() {
   await server.stop();
