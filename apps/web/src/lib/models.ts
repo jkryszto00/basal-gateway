@@ -4,7 +4,7 @@ export type ModelInfo = { name: string; default: boolean };
 
 // The gateway is the source of truth for models (UPSTREAMS); GATEWAY_INTERNAL_URL when the dashboard
 // reaches it on another address than the public one.
-const GATEWAY = process.env.GATEWAY_INTERNAL_URL ?? process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8787";
+const GATEWAY = process.env.GATEWAY_INTERNAL_URL ?? process.env.GATEWAY_PUBLIC_URL ?? "http://localhost:8787";
 
 /** The gateway's models, or null when it cannot be reached. */
 export async function listModels(): Promise<ModelInfo[] | null> {

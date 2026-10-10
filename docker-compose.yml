@@ -1,9 +1,18 @@
-# Postgres and Redis for the gateway and the dashboard: `docker compose up -d postgres redis`.
+# The whole stack with Docker:
+#   cp .env.example .env            # set BETTER_AUTH_SECRET (openssl rand -hex 32)
+#   docker compose --profile mock up -d --build     # with the mock basal server (made-up answers, no GPU)
+#   docker compose --profile gpu up -d --build      # with basal-rs on an NVIDIA GPU (NVIDIA Container Toolkit)
+# Dashboard on http://localhost:3000, API on http://localhost:8787. Without a profile the gateway uses UPSTREAMS from
+# .env (point it at your own inference server). Local development without the app containers:
+#   docker compose up -d postgres redis
 #
-# basal-rs (inference on an NVIDIA GPU, needs the NVIDIA Container Toolkit): `docker compose --profile gpu up -d`.
-# The first start downloads the model and generates its GEMM tables (minutes; `docker compose logs -f basal-rs`);
-# later starts reuse them from the basal-data volume. Then point the gateway at it:
-#   UPSTREAMS={"basal-1.5":{"url":"http://localhost:8000","path":"/v1/basal"}}
+# basal-rs: the first start downloads the model and generates its GEMM tables (minutes; docker compose logs -f
+# basal-rs); later starts reuse them from the basal-data volume.
+
+x-app-env: &app-env
+  DATABASE_URL: postgres://basal:basal@postgres:5432/basal
+  REDIS_URL: redis://redis:6379
+
 services:
   postgres:
     image: postgres:17
@@ -13,10 +22,51 @@ services:
       POSTGRES_DB: basal
     ports: ["5432:5432"]
     volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "basal"]
+      interval: 2s
+      retries: 30
 
   redis:
     image: redis:8
     ports: ["6379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      retries: 30
+
+  gateway:
+    profiles: [mock, gpu, app]
+    build: { context: ., dockerfile: apps/gateway/Dockerfile }
+    env_file: [{ path: .env, required: false }]
+    environment:
+      <<: *app-env
+      # the inference server: the mock or basal-rs container, unless UPSTREAMS_DOCKER is set in .env
+      UPSTREAMS: ${UPSTREAMS_DOCKER:-{"basal-1.5":{"url":"http://inference:8000","path":"/v1/basal"}}}
+    ports: ["8787:8787"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    restart: unless-stopped
+
+  web:
+    profiles: [mock, gpu, app]
+    build: { context: ., dockerfile: apps/web/Dockerfile }
+    env_file: [{ path: .env, required: false }]
+    environment:
+      <<: *app-env
+      GATEWAY_INTERNAL_URL: http://gateway:8787
+    ports: ["3000:3000"]
+    depends_on:
+      gateway: { condition: service_started }
+    restart: unless-stopped
+
+  mock:
+    profiles: [mock]
+    build: { context: ., dockerfile: apps/mock/Dockerfile }
+    networks:
+      default:
+        aliases: [inference]
 
   basal-rs:
     profiles: [gpu]
@@ -27,6 +77,9 @@ services:
     volumes: [basal-data:/data]
     environment:
       HF_TOKEN: ${HF_TOKEN:-}
+    networks:
+      default:
+        aliases: [inference]
     deploy:
       resources:
         reservations:
