@@ -19,7 +19,6 @@ let strict: ReturnType<typeof createApp>; // low per-account limits
 let daily: ReturnType<typeof createApp>; // low daily limit
 let open: ReturnType<typeof createApp>; // credits not required
 let rs: ReturnType<typeof createApp>; // basal-rs style upstream
-let v10: ReturnType<typeof createApp>; // basal-1.0 server
 let hooked: ReturnType<typeof createApp>; // with extension hooks
 let seenEvents: { model: string; inputTokens: number }[] = [];
 let refuseNext = false;
@@ -80,15 +79,6 @@ beforeAll(async () => {
       usage: { input_tokens: 100, output_tokens: 0, questions: 1, branches: 1, latency_ms: 8 },
     });
   });
-  // basal-1.0 server: usage has token counts only
-  upstream.post("/v1/basal10", async (c) => {
-    const req = await c.req.json();
-    return c.json({
-      model: "basal-1.0-4.5B",
-      answers: Object.fromEntries(Object.keys(req.questions).map((k) => [k, { type: "choice", choice: "a" }])),
-      usage: { input_tokens: 200, output_tokens: 0 },
-    });
-  });
   fake = Bun.serve({ fetch: upstream.fetch, port: 0 });
   const url = `http://127.0.0.1:${fake.port}`;
   app = createApp({
@@ -130,13 +120,6 @@ beforeAll(async () => {
     }),
     userLimits: limits(),
     defaultModel: "basal-1.5-max",
-  });
-  v10 = createApp({
-    db,
-    redis,
-    upstreams: createUpstreams({ "basal-1.0": { url, path: "/v1/basal10" } }),
-    userLimits: limits(),
-    defaultModel: "basal-1.0",
   });
   hooked = createApp({
     db,
@@ -229,26 +212,6 @@ describe("POST /v1/systemone", () => {
     expect(unknown.status).toBe(404);
     expect(((await unknown.json()) as { error: { message: string } }).error.message).toContain("basal-1.5, basal-1.5-max");
   });
-  it("completes the usage of a basal-1.0 server from the request", async () => {
-    const { key } = await newKey();
-    const res = await post(
-      key,
-      {
-        state: "x",
-        questions: {
-          a: { type: "choice", criteria: ["x", "y"] },
-          b: { type: "noul" },
-          c: { type: "multi", criteria: { p: "P", q: "Q", r: "R" } },
-        },
-      },
-      v10,
-    );
-    expect(res.status).toBe(200);
-    const usage = ((await res.json()) as { usage: Record<string, number> }).usage;
-    expect(usage).toMatchObject({ input_tokens: 200, output_tokens: 0, questions: 3, branches: 5 }); // 1 + 1 + 3
-    expect(usage.latency_ms).toBeGreaterThanOrEqual(0);
-  });
-
   it("lists models with the default", async () => {
     const res = await rs.request("/v1/models");
     expect(await res.json()).toEqual({

@@ -31,7 +31,7 @@ web (Next.js) ── sign up, API keys, usage, balance, settings
   GitHub and Google sign in, open or closed sign up and allowed email domains, breached-password check (Have I Been
   Pwned), optional Cloudflare Turnstile, rate-limited sign in, sign up and resets, password change and account
   deletion.
-- **Several models**: basal 1.5 and 1.0; each public model name maps to an inference server (`UPSTREAMS`), clients
+- **Several models**: each public model name maps to an inference server (`UPSTREAMS`), clients
   pick one with `"model"`, and the dashboard lists them and breaks usage down per model.
 
 ## Quick start
@@ -115,29 +115,6 @@ DEFAULT_MODEL=basal-1.5
 ```
 
 `GET /v1/models` lists the models and the default.
-
-### basal 1.0
-
-basal-1.0 models (`Remek/basal-1.0-4.5B`, `Remek/basal-1.0-1.5B`) work the same way, served by basal-rs or a basal
-1.0 server. They answer `choice`, `noul` and `score` questions; `multi`, `act` and `facts` are basal-1.5 features
-that a 1.0 server rejects (422). A 1.0 server reports only token counts, so the gateway fills in `questions`,
-`branches` and `latency_ms` from the request and its own timing.
-
-### basal-rs with Docker
-
-On a machine with an NVIDIA GPU and the [NVIDIA Container
-Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/):
-
-```bash
-docker compose --profile gpu up -d          # basal-rs on :8000, BASAL_MODEL=mini|4.5B|max (default 4.5B)
-docker compose logs -f basal-rs             # first start: model download and GEMM tables, minutes
-```
-
-```bash
-UPSTREAMS={"basal-1.5":{"url":"http://localhost:8000","path":"/v1/basal"}}
-```
-
-On a Mac, run basal-rs natively (Metal): `brew install itsoltech/tap/basal-rs && basal serve`.
 
 ## Configuration
 
