@@ -67,10 +67,20 @@ export const apiError = (code: string, message: string, status: number, details?
 const fail = (code: ErrorCode, message: string, status: ContentfulStatusCode, details?: unknown) =>
   apiError(code, message, status, details);
 
-/** Rejected before parsing; a maximal valid request (32k-char state, 16 questions) is far below it. */
-export const MAX_BODY_BYTES = 256 * 1024;
+const basalResponse = z.looseObject({ answers: z.record(z.string(), z.unknown()), usage: decisionUsage });
 
-const upstreamResponse = z.looseObject({ answers: z.record(z.string(), z.unknown()), usage: decisionUsage });
+/** passthrough servers: any JSON object; the usage fields the gateway knows are taken when present */
+const anyUsage = z.looseObject({
+  input_tokens: z.number().int().nonnegative().optional(),
+  output_tokens: z.number().int().nonnegative().optional(),
+  questions: z.number().int().nonnegative().optional(),
+  branches: z.number().int().nonnegative().optional(),
+  latency_ms: z.number().nonnegative().optional(),
+});
+const passthroughResponse = z.looseObject({ usage: anyUsage.optional() });
+
+const jsonObject = (v: unknown): v is Record<string, unknown> =>
+  typeof v === "object" && v !== null && !Array.isArray(v);
 
 export function createApp({ db, redis, upstreams, userLimits, defaultModel, hooks = {} }: Deps) {
   const app = new Hono();
@@ -80,11 +90,13 @@ export function createApp({ db, redis, upstreams, userLimits, defaultModel, hook
 
   app.get("/health", (c) => c.json({ status: "ok" }));
 
+  // the largest body any model accepts, rejected before reading; each model's own limit is checked once it is known
+  const maxBody = Math.max(...[...upstreams.values()].map((u) => u.maxBodyBytes));
   app.use(
     "/v1/*",
     bodyLimit({
-      maxSize: MAX_BODY_BYTES,
-      onError: () => fail("payload_too_large", `request body is larger than ${MAX_BODY_BYTES / 1024} KiB`, 413),
+      maxSize: maxBody,
+      onError: () => fail("payload_too_large", `request body is larger than ${Math.floor(maxBody / 1024)} KiB`, 413),
     }),
   );
 
@@ -94,6 +106,9 @@ export function createApp({ db, redis, upstreams, userLimits, defaultModel, hook
       models: [...upstreams.values()].map((u) => ({
         name: u.model,
         default: u.model === defaultModel,
+        api: u.api,
+        max_body_bytes: u.maxBodyBytes,
+        ...(u.meta ? { meta: u.meta } : {}),
       })),
     }),
   );
@@ -105,20 +120,38 @@ export function createApp({ db, redis, upstreams, userLimits, defaultModel, hook
     const key = await resolveKey(db, redis, c.req.header("authorization"));
     if (!key) return fail("unauthorized", "missing or invalid API key", 401);
 
+    const text = await c.req.text();
     let raw: unknown;
     try {
-      raw = await c.req.json();
+      raw = JSON.parse(text);
     } catch {
       return fail("invalid_json", "request body is not valid JSON", 400);
     }
-    const parsed = decisionRequest.safeParse(raw);
-    if (!parsed.success)
-      return fail("invalid_request", "request does not match the schema", 422, z.treeifyError(parsed.error));
-    const { model = defaultModel, ...body } = parsed.data;
+    if (!jsonObject(raw)) return fail("invalid_json", "request body must be a JSON object", 400);
 
+    const model = typeof raw.model === "string" ? raw.model : defaultModel;
     const upstream = upstreams.get(model);
     if (!upstream)
       return fail("unknown_model", `unknown model ${model}; available: ${[...upstreams.keys()].join(", ")}`, 404);
+    if (Buffer.byteLength(text) > upstream.maxBodyBytes)
+      return fail(
+        "payload_too_large",
+        `request body is larger than ${Math.floor(upstream.maxBodyBytes / 1024)} KiB, the limit of ${model}`,
+        413,
+      );
+
+    let body: Record<string, unknown>;
+    if (upstream.api === "basal") {
+      // basal-1.5: catch malformed requests here instead of on the GPU
+      const parsed = decisionRequest.safeParse(raw);
+      if (!parsed.success)
+        return fail("invalid_request", "request does not match the schema", 422, z.treeifyError(parsed.error));
+      const { model: _model, ...rest } = parsed.data;
+      body = rest;
+    } else {
+      const { model: _model, ...rest } = raw; // passthrough: the server validates
+      body = rest;
+    }
 
     const keyScope = `key:${key.keyId}` as const;
     const userScope = `user:${key.userId}` as const;
@@ -186,23 +219,25 @@ export function createApp({ db, redis, upstreams, userLimits, defaultModel, hook
         const message = (result.body as { error?: unknown })?.error;
         return fail("invalid_request", typeof message === "string" ? message : "rejected by the model", 422);
       }
-      const out = upstreamResponse.safeParse(result.body);
+      const out = (upstream.api === "basal" ? basalResponse : passthroughResponse).safeParse(result.body);
       if (result.status !== 200 || !out.success) {
         console.error(`[${requestId}] upstream ${model} status ${result.status}`, result.body);
         return fail("upstream_error", "inference failed", 502);
       }
 
-      const usage = out.data.usage;
+      const usage = out.data.usage ?? {};
+      const totalMs = performance.now() - t0;
       const event: UsageEvent = {
         id: requestId,
         userId: key.userId,
         apiKeyId: key.keyId,
         model,
-        inputTokens: usage.input_tokens,
-        questions: usage.questions,
-        branches: usage.branches,
-        upstreamLatencyMs: usage.latency_ms,
-        totalLatencyMs: performance.now() - t0,
+        inputTokens: usage.input_tokens ?? 0,
+        questions: usage.questions ?? 0,
+        branches: usage.branches ?? 0,
+        upstreamLatencyMs: usage.latency_ms ?? totalMs,
+        totalLatencyMs: totalMs,
+        details: usage,
         createdAt: new Date().toISOString(),
       };
       await recordUsage(redis, event);

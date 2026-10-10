@@ -13,6 +13,18 @@ export class Upstream {
     private readonly cfg: UpstreamConfig,
   ) {}
 
+  get api() {
+    return this.cfg.api;
+  }
+
+  get maxBodyBytes() {
+    return this.cfg.maxBodyBytes;
+  }
+
+  get meta() {
+    return this.cfg.meta;
+  }
+
   /** In-process backpressure: basal-serve queues without limit, so the gateway refuses past maxInFlight. */
   tryAcquire(): boolean {
     if (this.inFlight >= this.cfg.maxInFlight) return false;
