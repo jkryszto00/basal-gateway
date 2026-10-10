@@ -1,4 +1,4 @@
-import { boolean, index, integer, pgTable, real, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { boolean, index, integer, jsonb, pgTable, real, text, timestamp, uuid } from "drizzle-orm/pg-core";
 
 // --- Better Auth core tables (user, session, account, verification) ---------------------------------------------
 
@@ -102,6 +102,8 @@ export const usageEvents = pgTable(
     branches: integer("branches").notNull(),
     upstreamLatencyMs: real("upstream_latency_ms").notNull(),
     totalLatencyMs: real("total_latency_ms").notNull(),
+    /** the server's whole usage block: units of newer models (audio seconds, frames, ...) without a schema change */
+    details: jsonb("details").$type<Record<string, unknown>>(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index("usage_events_user_created_idx").on(t.userId, t.createdAt)],

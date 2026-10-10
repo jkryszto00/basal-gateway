@@ -19,6 +19,7 @@ let strict: ReturnType<typeof createApp>; // low per-account limits
 let daily: ReturnType<typeof createApp>; // low daily limit
 let open: ReturnType<typeof createApp>; // credits not required
 let rs: ReturnType<typeof createApp>; // basal-rs style upstream
+let omni: ReturnType<typeof createApp>; // passthrough model next to a basal one
 let hooked: ReturnType<typeof createApp>; // with extension hooks
 let seenEvents: { model: string; inputTokens: number }[] = [];
 let refuseNext = false;
@@ -83,6 +84,16 @@ beforeAll(async () => {
       usage: { input_tokens: 100, output_tokens: 0, questions: 1, branches: 1, latency_ms: 8 },
     });
   });
+  // a model family the gateway does not know (e.g. omni): any request shape, its own usage units
+  upstream.post("/v1/omni", async (c) => {
+    const req = (await c.req.json()) as { audio?: string; model?: string };
+    return c.json({
+      transcript_label: "complaint",
+      echoed_model: req.model ?? null,
+      audio_chars: req.audio?.length ?? 0,
+      usage: { input_tokens: 40, audio_seconds: 12.5 },
+    });
+  });
   fake = Bun.serve({ fetch: upstream.fetch, port: 0 });
   const url = `http://127.0.0.1:${fake.port}`;
   app = createApp({
@@ -124,6 +135,23 @@ beforeAll(async () => {
     }),
     userLimits: limits(),
     defaultModel: "basal-1.5-max",
+  });
+  omni = createApp({
+    db,
+    redis,
+    upstreams: createUpstreams({
+      "basal-1.5": { url, token: "upstream-secret" },
+      "basal-omni": {
+        url,
+        path: "/v1/omni",
+        api: "passthrough",
+        maxBodyBytes: 1024 * 1024,
+        model: "basal-omni-preview",
+        meta: { modalities: ["text", "audio"] },
+      },
+    }),
+    userLimits: limits(),
+    defaultModel: "basal-1.5",
   });
   hooked = createApp({
     db,
@@ -221,15 +249,46 @@ describe("POST /v1/systemone", () => {
       "basal-1.5, basal-1.5-max",
     );
   });
-  it("lists models with the default", async () => {
-    const res = await rs.request("/v1/models");
+  it("lists models with the default, their format, body limit and meta", async () => {
+    const res = await omni.request("/v1/models");
     expect(await res.json()).toEqual({
-      default: "basal-1.5-max",
+      default: "basal-1.5",
       models: [
-        { name: "basal-1.5", default: false },
-        { name: "basal-1.5-max", default: true },
+        { name: "basal-1.5", default: true, api: "basal", max_body_bytes: 262_144 },
+        {
+          name: "basal-omni",
+          default: false,
+          api: "passthrough",
+          max_body_bytes: 1_048_576,
+          meta: { modalities: ["text", "audio"] },
+        },
       ],
     });
+  });
+
+  it("passes any request to a passthrough model and keeps its usage units", async () => {
+    const { key } = await newKey();
+    const audio = "x".repeat(400 * 1024); // over the basal model's 256 KiB, under omni's 1 MiB
+    const res = await post(key, { model: "basal-omni", audio }, omni);
+    expect(res.status).toBe(200);
+    const out = (await res.json()) as Record<string, unknown> & { id: string };
+    expect(out).toMatchObject({
+      model: "basal-omni",
+      transcript_label: "complaint",
+      echoed_model: "basal-omni-preview", // the server's model name, not the public one
+      audio_chars: audio.length,
+      usage: { input_tokens: 40, audio_seconds: 12.5 },
+    });
+
+    expect(await new UsageFlusher(db, redis).flush()).toBe(1);
+    const [ev] = await db.select().from(usageEvents).where(eq(usageEvents.id, out.id));
+    expect(ev).toMatchObject({ model: "basal-omni", inputTokens: 40, questions: 0, branches: 0 });
+    expect(ev?.details).toEqual({ input_tokens: 40, audio_seconds: 12.5 });
+
+    const big = await post(key, { ...body(), state: audio }, omni); // same size to the basal model
+    expect(big.status).toBe(413);
+    expect(((await big.json()) as { error: { message: string } }).error.message).toContain("the limit of basal-1.5");
+    expect((await post(key, "[1, 2]", omni)).status).toBe(400); // not an object
   });
   it("proxies and records the usage", async () => {
     const { key, id: keyId } = await newKey();

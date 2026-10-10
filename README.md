@@ -114,6 +114,9 @@ UPSTREAMS={"basal-1.5":{"url":"http://localhost:8000","path":"/v1/basal","maxInF
 | `token` | | sent as `Authorization: Bearer <token>` (e.g. a Modal proxy token); leave out on a private network |
 | `maxInFlight` | `64` | requests in flight to this server; beyond it the gateway answers 503 instead of queueing |
 | `timeoutMs` | `180000` | per request, long enough for a serverless cold start |
+| `api` | `basal` | `basal`: basal-1.5 requests validated before the GPU; `passthrough`: any JSON object, see below |
+| `maxBodyBytes` | `262144` | largest request body for this model (up to 64 MiB), e.g. more for audio or video inputs |
+| `meta` | | free-form facts shown in `/v1/models`, e.g. `{"modalities": ["text", "audio"]}` |
 
 
 A server that answers 503 or 529 (basal-rs, queue full) is reported to the client as 503 `overloaded` with
@@ -134,6 +137,24 @@ DEFAULT_MODEL=basal-1.5
 ```
 
 `GET /v1/models` lists the models and the default.
+
+### New model families (omni, 2.0, ...)
+
+The gateway validates basal-1.5 requests (questions, options, state size) before they reach a GPU. A newer family
+with other inputs, such as audio or video, or other question types, does not have to wait for a gateway release:
+mark it `"api": "passthrough"` and the gateway forwards any JSON object to the server, which validates it.
+
+```bash
+UPSTREAMS={
+  "basal-1.5":  {"url":"http://gpu:8000","path":"/v1/basal"},
+  "basal-omni": {"url":"http://gpu:8001","path":"/v1/omni","api":"passthrough","maxBodyBytes":16777216,
+                 "meta":{"modalities":["text","audio","video"]}}
+}
+```
+
+Keys, limits, routing by `"model"` and the hooks work the same. From the server's `usage` block the gateway records
+the fields it knows (`input_tokens`, `questions`, `branches`, `latency_ms`) and keeps the whole block in
+`usage_events.details`, so new units (audio seconds, video frames) are stored without a schema change.
 
 ## Configuration
 

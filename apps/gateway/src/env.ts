@@ -15,6 +15,21 @@ export const upstreamConfig = z.object({
   maxInFlight: z.number().int().positive().default(64),
   /** a scaled-to-zero Modal container needs time to restore its snapshot */
   timeoutMs: z.number().int().positive().default(180_000),
+  /**
+   * Request and response format. basal: basal-1.5 requests (questions validated before the GPU) and its usage block.
+   * passthrough: any JSON object goes to the server, which validates it; for model families the gateway does not know
+   * yet (omni, 2.0). Usage fields it knows are recorded when present, the whole usage block is kept as details.
+   */
+  api: z.enum(["basal", "passthrough"]).default("basal"),
+  /** largest request body for this model, in bytes; media inputs need more than text */
+  maxBodyBytes: z
+    .number()
+    .int()
+    .positive()
+    .max(64 * 1024 * 1024)
+    .default(256 * 1024),
+  /** free-form facts shown in GET /v1/models, e.g. {"modalities": ["text", "audio", "video"]} */
+  meta: z.record(z.string(), z.unknown()).optional(),
 });
 
 export type UpstreamConfig = z.infer<typeof upstreamConfig>;

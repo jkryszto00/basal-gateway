@@ -11,6 +11,8 @@ export type UsageEvent = {
   branches: number;
   upstreamLatencyMs: number;
   totalLatencyMs: number;
+  /** the server's usage block as returned */
+  details?: Record<string, unknown>;
   createdAt: string;
 };
 
