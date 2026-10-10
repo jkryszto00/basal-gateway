@@ -1,4 +1,5 @@
-import type { UpstreamConfig } from "./env";
+import type { z } from "zod";
+import { type UpstreamConfig, upstreamConfig } from "./env";
 
 export type UpstreamResult =
   | { kind: "ok"; status: number; body: unknown }
@@ -32,13 +33,13 @@ export class Upstream {
   async decide(body: unknown): Promise<UpstreamResult> {
     try {
       // fetch follows Modal's 303 "still running" redirects (one per 150 s) on its own
-      const res = await fetch(new URL("/v1/systemone", this.cfg.url), {
+      const res = await fetch(new URL(this.cfg.path, this.cfg.url), {
         method: "POST",
         headers: {
           "content-type": "application/json",
           ...(this.cfg.token ? { authorization: `Bearer ${this.cfg.token}` } : {}),
         },
-        body: JSON.stringify(body),
+        body: JSON.stringify(this.cfg.model ? { ...(body as object), model: this.cfg.model } : body),
         signal: AbortSignal.timeout(this.cfg.timeoutMs),
       });
       const text = await res.text();
@@ -56,6 +57,7 @@ export class Upstream {
   }
 }
 
-export function createUpstreams(config: Record<string, UpstreamConfig>): Map<string, Upstream> {
-  return new Map(Object.entries(config).map(([model, cfg]) => [model, new Upstream(model, cfg)]));
+/** Model name -> upstream; each config is validated and gets its defaults (path, maxInFlight, timeoutMs). */
+export function createUpstreams(config: Record<string, z.input<typeof upstreamConfig>>): Map<string, Upstream> {
+  return new Map(Object.entries(config).map(([model, cfg]) => [model, new Upstream(model, upstreamConfig.parse(cfg))]));
 }
