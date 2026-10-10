@@ -2,16 +2,7 @@
 import { parseArgs } from "node:util";
 import { createDb } from "@basal/db";
 import { Redis } from "ioredis";
-import {
-  addUser,
-  type Ctx,
-  deleteUser,
-  listKeys,
-  listUsers,
-  revokeKey,
-  usageReport,
-  verifyUser,
-} from "./commands";
+import { addUser, type Ctx, deleteUser, listKeys, listUsers, revokeKey, usageReport, verifyUser } from "./commands";
 
 const HELP = `Usage: bun run admin <command>
 
@@ -33,7 +24,11 @@ function table(rows: Row[]) {
   if (!rows.length) return console.log("(none)");
   const cols = Object.keys(rows[0]!);
   const width = cols.map((c) => Math.max(c.length, ...rows.map((r) => cell(r[c]).length)));
-  const line = (vals: string[]) => vals.map((v, i) => v.padEnd(width[i]!)).join("  ").trimEnd();
+  const line = (vals: string[]) =>
+    vals
+      .map((v, i) => v.padEnd(width[i]!))
+      .join("  ")
+      .trimEnd();
   console.log(line(cols));
   for (const r of rows) console.log(line(cols.map((c) => cell(r[c]))));
 }

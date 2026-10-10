@@ -14,9 +14,12 @@
     "db:up": "docker compose up -d postgres redis",
     "db:generate": "bun --filter @basal/db generate",
     "db:migrate": "bun --filter @basal/db migrate",
-    "admin": "bun run --cwd apps/cli admin"
+    "admin": "bun run --cwd apps/cli admin",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
   },
   "devDependencies": {
+    "prettier": "^3",
     "turbo": "^2.11.7",
     "typescript": "^5"
   }

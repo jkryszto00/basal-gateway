@@ -40,7 +40,10 @@ export function AccountMenu({ name, email }: { name: string; email: string }) {
         </svg>
       </button>
       {open && (
-        <div role="menu" className="absolute right-0 z-10 mt-1 w-56 rounded-lg border border-line bg-card p-1 shadow-lg">
+        <div
+          role="menu"
+          className="absolute right-0 z-10 mt-1 w-56 rounded-lg border border-line bg-card p-1 shadow-lg"
+        >
           <div className="truncate px-3 py-2 text-xs text-muted">{email}</div>
           <div className="my-1 h-px bg-line" />
           <Link href="/dashboard/settings" role="menuitem" className={item} onClick={() => setOpen(false)}>

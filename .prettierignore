@@ -1,0 +1,8 @@
+node_modules
+.next
+.turbo
+dist
+bun.lock
+packages/db/migrations
+inference
+*.md

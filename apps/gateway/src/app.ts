@@ -112,11 +112,13 @@ export function createApp({ db, redis, upstreams, userLimits, defaultModel, hook
       return fail("invalid_json", "request body is not valid JSON", 400);
     }
     const parsed = decisionRequest.safeParse(raw);
-    if (!parsed.success) return fail("invalid_request", "request does not match the schema", 422, z.treeifyError(parsed.error));
+    if (!parsed.success)
+      return fail("invalid_request", "request does not match the schema", 422, z.treeifyError(parsed.error));
     const { model = defaultModel, ...body } = parsed.data;
 
     const upstream = upstreams.get(model);
-    if (!upstream) return fail("unknown_model", `unknown model ${model}; available: ${[...upstreams.keys()].join(", ")}`, 404);
+    if (!upstream)
+      return fail("unknown_model", `unknown model ${model}; available: ${[...upstreams.keys()].join(", ")}`, 404);
 
     const keyScope = `key:${key.keyId}` as const;
     const userScope = `user:${key.userId}` as const;
@@ -154,7 +156,11 @@ export function createApp({ db, redis, upstreams, userLimits, defaultModel, hook
     }
     if (!(await acquireSlot(redis, userScope, userLimits.concurrency, requestId))) {
       await releaseSlot(redis, keyScope, requestId);
-      return fail("concurrency_limited", `limit of ${userLimits.concurrency} concurrent requests for this account`, 429);
+      return fail(
+        "concurrency_limited",
+        `limit of ${userLimits.concurrency} concurrent requests for this account`,
+        429,
+      );
     }
     try {
       if (!upstream.tryAcquire()) return fail("overloaded", "model is at capacity, retry shortly", 503);

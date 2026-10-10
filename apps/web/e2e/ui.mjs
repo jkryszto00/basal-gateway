@@ -13,7 +13,9 @@ if (!log) throw new Error("set WEB_LOG to the app's log file (emails are printed
 const browser = await chromium.launch({ channel: "chrome", headless: true });
 // a fresh client IP per run (the app reads x-forwarded-for unless CLIENT_IP_HEADER says otherwise), so repeated runs
 // do not hit the per-IP sign up limit
-const page = await browser.newPage({ extraHTTPHeaders: { "x-forwarded-for": `10.${Date.now() % 250}.${Math.floor(Math.random() * 250)}.1` } });
+const page = await browser.newPage({
+  extraHTTPHeaders: { "x-forwarded-for": `10.${Date.now() % 250}.${Math.floor(Math.random() * 250)}.1` },
+});
 const errors = [];
 page.on("pageerror", (e) => errors.push(e.message));
 page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
@@ -165,7 +167,8 @@ await page.fill('input[name="current"]', "not-my-password");
 await page.fill('input[name="password"]', "third-horse-battery");
 await page.fill('input[name="confirm"]', "third-horse-battery");
 await submit();
-if (!(await alert()).includes("current password is wrong")) throw new Error("password changed with a wrong current one");
+if (!(await alert()).includes("current password is wrong"))
+  throw new Error("password changed with a wrong current one");
 await page.fill('input[name="current"]', "new-horse-battery-staple");
 await page.fill('input[name="password"]', "third-horse-battery");
 await page.fill('input[name="confirm"]', "third-horse-battery");
@@ -179,7 +182,8 @@ const del = page.locator("form", { hasText: "Delete account" });
 await del.locator('input[name="confirm"]').fill("someone@else.com");
 await del.locator('input[name="password"]').fill("third-horse-battery");
 await del.locator('button[type="submit"]').click();
-if (!(await del.locator('[role="alert"]').textContent()).includes("Type your email")) throw new Error("deleted without confirmation");
+if (!(await del.locator('[role="alert"]').textContent()).includes("Type your email"))
+  throw new Error("deleted without confirmation");
 await del.locator('input[name="confirm"]').fill(email);
 await del.locator('input[name="password"]').fill("wrong-password-123");
 await del.locator('button[type="submit"]').click();
@@ -216,7 +220,10 @@ if (!limited.startsWith("Too many attempts")) throw new Error(`no sign in limit:
 step(`sign in limited per email: "${limited}"`);
 
 // GitHub / Google, when configured: the redirect to the provider (stubbed) and a forged callback
-for (const [name, host, id] of [["GitHub", "github.com", "github"], ["Google", "accounts.google.com", "google"]]) {
+for (const [name, host, id] of [
+  ["GitHub", "github.com", "github"],
+  ["Google", "accounts.google.com", "google"],
+]) {
   await page.goto(`${base}/login`);
   if (!(await page.getByText(`Continue with ${name}`).count())) continue;
   let target;
@@ -226,7 +233,10 @@ for (const [name, host, id] of [["GitHub", "github.com", "github"], ["Google", "
   });
   await page.click(`text=Continue with ${name}`);
   await page.waitForFunction(() => document.body.innerText === "provider");
-  if (target.searchParams.get("redirect_uri") !== `${base}/api/auth/callback/${id}` || !target.searchParams.get("state"))
+  if (
+    target.searchParams.get("redirect_uri") !== `${base}/api/auth/callback/${id}` ||
+    !target.searchParams.get("state")
+  )
     throw new Error(`${name} redirect: ${target}`);
   await page.goto(`${base}/api/auth/callback/${id}?code=forged&state=forged`);
   await page.waitForURL(`${base}/login?error=state_mismatch`);
