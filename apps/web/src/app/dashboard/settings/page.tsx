@@ -37,7 +37,7 @@ export default async function Settings() {
       <Card className="border-danger/40 p-5">
         <h2 className="font-semibold text-danger">Delete account</h2>
         <p className="mb-4 mt-1 text-sm text-muted">
-          Deletes your account, API keys, remaining credits and usage history right away. API keys stop working
+          Deletes your account, API keys and usage history right away. API keys stop working
           immediately. This cannot be undone.
           {!hasPassword && " If you signed in more than a day ago, sign in again first."}
         </p>

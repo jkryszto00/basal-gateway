@@ -133,8 +133,8 @@ function CheckInbox({ email }: { email: string }) {
     <div className="space-y-4 text-sm">
       <p className="font-medium">Check your inbox</p>
       <p className="text-muted">
-        We sent a confirmation link to <span className="text-fg">{email}</span>. Open it to activate your account and
-        receive your free credits. The link expires in 24 hours.
+        We sent a confirmation link to <span className="text-fg">{email}</span>. Open it to activate your account. The
+        link expires in 24 hours.
       </p>
       <form action={formAction} className="space-y-3">
         <input type="hidden" name="email" value={email} />

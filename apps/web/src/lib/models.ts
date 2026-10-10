@@ -1,13 +1,8 @@
 import "server-only";
 
-export type ModelInfo = {
-  name: string;
-  default: boolean;
-  /** micro-USD; null: served for free */
-  pricing: { unit: "micro_usd"; per_million_input_tokens: number; per_thousand_branches: number } | null;
-};
+export type ModelInfo = { name: string; default: boolean };
 
-// The gateway is the source of truth for models and prices (UPSTREAMS); GATEWAY_INTERNAL_URL when the dashboard
+// The gateway is the source of truth for models (UPSTREAMS); GATEWAY_INTERNAL_URL when the dashboard
 // reaches it on another address than the public one.
 const GATEWAY = process.env.GATEWAY_INTERNAL_URL ?? process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8787";
 
