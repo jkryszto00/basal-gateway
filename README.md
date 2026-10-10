@@ -162,6 +162,7 @@ All settings are environment variables, read from `.env` at the repository root 
 | `SMTP_URL` | | email over SMTP: `smtp://user:pass@host:587` (STARTTLS) or `smtps://…:465` |
 | `RESEND_API_KEY` | | email through Resend when `SMTP_URL` is not set; without either, emails are printed to the log |
 | `EMAIL_FROM` | `<APP_NAME> <noreply@localhost>` | sender of confirmation and reset emails |
+| `HIBP_ENABLED` | `true` | breached-password check against haveibeenpwned.com; `false` for installs without internet access |
 | `EMAIL_VERIFICATION` | `true` | `false`: accounts work right after sign up, for installs that cannot send email |
 | `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` | | optional Cloudflare Turnstile on sign up |
 | `GITHUB_CLIENT_ID`/`_SECRET`, `GOOGLE_CLIENT_ID`/`_SECRET` | | optional OAuth sign in; callback `<BETTER_AUTH_URL>/api/auth/callback/<github\|google>` |

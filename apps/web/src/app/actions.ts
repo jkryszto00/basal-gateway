@@ -7,8 +7,14 @@ import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { z } from "zod";
-import { isPasswordCompromised } from "better-auth/plugins";
-import { auth, OAUTH_PROVIDERS, type OAuthProvider, PASSWORD_COMPROMISED, requireUser } from "@/lib/auth";
+import {
+  auth,
+  OAUTH_PROVIDERS,
+  type OAuthProvider,
+  PASSWORD_COMPROMISED,
+  passwordBreached,
+  requireUser,
+} from "@/lib/auth";
 import { EMAIL_VERIFICATION } from "@/lib/email";
 import { clientIp } from "@/lib/client-ip";
 import { signInMethods } from "@/lib/data";
@@ -150,7 +156,7 @@ export async function resetPassword(_: FormState, form: FormData): Promise<FormS
   if (wait) return { error: tooMany(wait) };
   try {
     // checked here too: Better Auth uses up the token before hashing, so a refused password would burn the link
-    if (await isPasswordCompromised(parsed.data.password)) return { error: PASSWORD_COMPROMISED };
+    if (await passwordBreached(parsed.data.password)) return { error: PASSWORD_COMPROMISED };
     await auth.api.resetPassword({
       body: { token: parsed.data.token, newPassword: parsed.data.password },
       headers: await headers(),
@@ -199,7 +205,7 @@ export async function setPassword(_: FormState, form: FormData): Promise<FormSta
   const parsed = newPassword.safeParse(Object.fromEntries(form));
   if (!parsed.success) return { error: parsed.error.issues[0]?.message };
   try {
-    if (await isPasswordCompromised(parsed.data.password)) return { error: PASSWORD_COMPROMISED };
+    if (await passwordBreached(parsed.data.password)) return { error: PASSWORD_COMPROMISED };
     await auth.api.setPassword({ body: { newPassword: parsed.data.password }, headers: await headers() });
   } catch (e) {
     if (!(e instanceof APIError)) throw e;
