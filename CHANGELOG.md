@@ -11,6 +11,7 @@ follow [Semantic Versioning](https://semver.org/). Before 1.0, minor versions ma
 - Organizations: API keys, limits and usage per organization; a personal one for everyone, shared ones with owners,
   admins and members, email invitations, an organization switcher in the dashboard.
 - API keys with per-key and per-organization limits: requests per minute, concurrency, optional requests per day.
+- Monthly quotas of requests and input tokens per organization (admin CLI, or a default) and per key.
 - Several models per gateway, routed by `"model"`, with a default model; basal-rs `path` and `model` per upstream.
 - `passthrough` models for new basal families (omni, 2.0): any JSON request, per-model body limit, `meta`, and the
   server's whole usage block stored as `details`.
