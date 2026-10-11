@@ -38,11 +38,11 @@ const base = z.object({
   DATABASE_URL: z.string().min(1),
   REDIS_URL: z.string().min(1),
   GATEWAY_PORT: z.coerce.number().int().default(8787),
-  /** per account, over all its keys (each key also has its own, lower limits) */
-  USER_RPM_LIMIT: z.coerce.number().int().positive().default(120),
-  USER_CONCURRENCY_LIMIT: z.coerce.number().int().positive().default(16),
-  /** requests per UTC day per account; 0 means no daily limit */
-  USER_DAILY_REQUESTS: z.coerce.number().int().nonnegative().default(0),
+  /** per organization, over all its keys (each key also has its own, lower limits) */
+  ORG_RPM_LIMIT: z.coerce.number().int().positive().default(120),
+  ORG_CONCURRENCY_LIMIT: z.coerce.number().int().positive().default(16),
+  /** requests per UTC day per organization; 0 means no daily limit */
+  ORG_DAILY_REQUESTS: z.coerce.number().int().nonnegative().default(0),
   /** model used when a request names none; default: the first model in UPSTREAMS */
   DEFAULT_MODEL: z.string().min(1).optional(),
   /** {"basal-1.5": {"url": "...", "token": "..."}}: public model name -> basal-serve or basal-rs upstream */

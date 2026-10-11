@@ -12,16 +12,16 @@ const upstreams = createUpstreams(env.UPSTREAMS);
 const flusher = new UsageFlusher(db, redis);
 flusher.start();
 
-const userLimits = {
-  rpm: env.USER_RPM_LIMIT,
-  concurrency: env.USER_CONCURRENCY_LIMIT,
-  dailyRequests: env.USER_DAILY_REQUESTS,
+const orgLimits = {
+  rpm: env.ORG_RPM_LIMIT,
+  concurrency: env.ORG_CONCURRENCY_LIMIT,
+  dailyRequests: env.ORG_DAILY_REQUESTS,
 };
 const app = createApp({
   db,
   redis,
   upstreams,
-  userLimits,
+  orgLimits,
   defaultModel: env.DEFAULT_MODEL,
 });
 const server = Bun.serve({ fetch: app.fetch, port: env.GATEWAY_PORT });
