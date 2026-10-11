@@ -4,11 +4,13 @@ FROM oven/bun:1.3.14-slim
 WORKDIR /app
 ENV NODE_ENV=production
 
+# every workspace manifest, for a frozen install (add new workspaces here; CI builds the images)
 COPY package.json bun.lock ./
 COPY apps/gateway/package.json apps/gateway/
 COPY apps/web/package.json apps/web/
 COPY apps/cli/package.json apps/cli/
 COPY apps/mock/package.json apps/mock/
+COPY packages/admin/package.json packages/admin/
 COPY packages/db/package.json packages/db/
 COPY packages/shared/package.json packages/shared/
 RUN bun install --frozen-lockfile --production --filter @basal/gateway
