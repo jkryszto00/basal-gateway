@@ -208,7 +208,10 @@ await page.fill('input[name="password"]', "third-horse-battery");
 await submit();
 if (!(await alert()).includes("Wrong email or password")) throw new Error("deleted account signed in");
 // Organizations: create one, invite a second account, accept, roles, switching, delete
+let ipCounter = 0;
 async function signUpAndConfirm(address, name) {
+  // a fresh client IP per account: one run signs up more than the per-IP limit of 5 an hour
+  await page.setExtraHTTPHeaders({ "x-forwarded-for": `10.200.${Date.now() % 250}.${++ipCounter}` });
   await page.goto(`${base}/signup`);
   await page.fill('input[name="name"]', name);
   await page.fill('input[name="email"]', address);
@@ -311,6 +314,86 @@ await page.keyboard.press("Escape");
 await signOut();
 await page.waitForURL(`${base}/login`);
 step("member left by deleting their account; owner deleted the organization");
+
+// Instance admin, when the app runs with ADMIN_EMAILS=@<E2E_ADMIN_DOMAIN>
+async function signInAs(address, password) {
+  await page.goto(`${base}/login`);
+  await page.fill('input[name="email"]', address);
+  await page.fill('input[name="password"]', password);
+  await submit();
+}
+if (process.env.E2E_ADMIN_DOMAIN) {
+  const admin = `admin-${Date.now()}@${process.env.E2E_ADMIN_DOMAIN}`;
+  const adminName = `Admin ${Date.now()}`; // also the name of their personal organization
+  await signUpAndConfirm(admin, adminName);
+  await page.click("nav >> text=Admin");
+  await page.waitForURL(`${base}/dashboard/admin`);
+  const managed = `managed-${Date.now()}@example.com`;
+  const create = page.locator("form", { has: page.getByRole("button", { name: "Create account" }) });
+  await create.locator('input[name="email"]').fill(managed);
+  await create.getByRole("button", { name: "Create account" }).click();
+  const created = await create.locator('[role="status"]', { hasText: "shown once" }).textContent();
+  const password = created.match(/shown once: (\S+)/)[1];
+  step("admin created an account (password shown once)");
+
+  const row = page.locator("tr", { hasText: managed });
+  await row.getByRole("button", { name: "Disable" }).click();
+  await row.getByText("disabled").waitFor();
+  await signOut();
+  await page.waitForURL(`${base}/login`);
+  await signInAs(managed, password);
+  if (!(await alert()).includes("disabled")) throw new Error("disabled account signed in");
+  await signInAs(admin, "correct-horse-battery");
+  await page.waitForURL(`${base}/dashboard`);
+  await page.goto(`${base}/dashboard/admin`);
+  await page.locator("tr", { hasText: managed }).getByRole("button", { name: "Enable" }).click();
+  await page.locator("tr", { hasText: managed }).getByRole("button", { name: "Disable" }).waitFor();
+  await signOut();
+  await page.waitForURL(`${base}/login`);
+  await signInAs(managed, password);
+  await page.waitForURL(`${base}/dashboard`);
+  const before = errors.length;
+  const forbidden = await page.goto(`${base}/dashboard/admin`);
+  if (forbidden.status() !== 404) throw new Error(`admin page for a non-admin: ${forbidden.status()}`);
+  errors.splice(before); // the expected 404 is logged by the browser
+  step("disabled account refused, enabled again; admin page is 404 for others");
+
+  await page.goto(`${base}/dashboard`);
+  await signOut();
+  await page.waitForURL(`${base}/login`);
+  await signInAs(admin, "correct-horse-battery");
+  await page.waitForURL(`${base}/dashboard`);
+  await page.goto(`${base}/dashboard/admin`);
+  const invitee = `invitee-${Date.now()}@example.com`;
+  const invite = page.locator("form", { has: page.getByRole("button", { name: "Invite to sign up" }) });
+  await invite.locator('input[name="email"]').fill(invitee);
+  mark = logSize();
+  await invite.getByRole("button", { name: "Invite to sign up" }).click();
+  await invite.locator('[role="status"]', { hasText: `Invitation sent to ${invitee}` }).waitFor();
+  if (!(await emailLink(invitee, mark)).includes(`/signup?email=${encodeURIComponent(invitee)}`))
+    throw new Error("no sign up link in the invitation");
+  await page.locator("li", { hasText: invitee }).getByRole("button", { name: "Revoke" }).click();
+  await page.locator("li", { hasText: invitee }).waitFor({ state: "detached" });
+  step("sign up invitation emailed and revoked");
+
+  const orgRow = page.locator("tr", { hasText: adminName }).filter({ hasText: "personal" });
+  await orgRow.locator('input[name="requests"]').fill("5");
+  await orgRow.getByRole("button", { name: "Save" }).click();
+  await orgRow.locator('[role="status"]', { hasText: "Quota saved" }).waitFor();
+  await page.goto(`${base}/dashboard`);
+  await page.getByText("0 / 5").waitFor();
+  step("organization quota set by the admin, shown on the overview");
+
+  await page.goto(`${base}/dashboard/admin`);
+  const del = page.locator("tr", { hasText: managed });
+  await del.locator("summary", { hasText: "Delete" }).click();
+  await del.locator('input[name="confirm"]').fill(managed);
+  await del.getByRole("button", { name: "Delete account" }).click();
+  await page.locator("tr", { hasText: managed }).waitFor({ state: "detached" });
+  await signOut();
+  await page.waitForURL(`${base}/login`);
+  step("admin deleted the account");
+}
 
 const victim = `victim-${Date.now()}@example.com`;
 let limited = "";

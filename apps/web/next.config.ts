@@ -11,7 +11,7 @@ const nextConfig: NextConfig = {
   // self-contained server for the Docker image; traced from the monorepo root to include workspace packages
   output: "standalone",
   outputFileTracingRoot: join(process.cwd(), "../.."),
-  transpilePackages: ["@basal/db", "@basal/shared"], // workspace packages ship TypeScript source
+  transpilePackages: ["@basal/admin", "@basal/db", "@basal/shared"], // workspace packages ship TypeScript source
   turbopack: {
     rules: {
       "*.css": {

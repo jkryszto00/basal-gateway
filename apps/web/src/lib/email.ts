@@ -76,6 +76,16 @@ export const verificationEmail = (to: string, url: string) =>
     "The link expires in 24 hours. If you did not create an account, ignore this email.",
   );
 
+export const signupInvitationEmail = (to: string, url: string) =>
+  linkEmail(
+    to,
+    `You are invited to ${APP_NAME}`,
+    `An administrator invited you to create an account on ${APP_NAME}.`,
+    "Create your account",
+    url,
+    "The invitation expires in 14 days. Sign up with this email address.",
+  );
+
 // The organization's name and the inviter are left out on purpose (both chosen by users); the invitation page shows
 // them once the recipient has signed in.
 export const invitationEmail = (to: string, url: string) =>

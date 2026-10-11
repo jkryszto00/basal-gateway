@@ -11,6 +11,7 @@ import {
   organization,
   schema,
 } from "@basal/db";
+import { markSignupInvitationUsed } from "@basal/admin";
 import { apiKeyCacheKey } from "@basal/shared/keys";
 import { betterAuth } from "better-auth";
 import { APIError } from "better-auth/api";
@@ -19,6 +20,7 @@ import { nextCookies } from "better-auth/next-js";
 import { haveIBeenPwned, isPasswordCompromised, organization as organizations } from "better-auth/plugins";
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
+import { APP_URL } from "./app-name";
 import { db } from "./db";
 import { EMAIL_VERIFICATION, invitationEmail, resetPasswordEmail, trySendEmail, verificationEmail } from "./email";
 import { PASSWORD } from "./password";
@@ -63,9 +65,6 @@ export async function passwordBreached(password: string): Promise<boolean> {
 export type OAuthProvider = "github" | "google";
 export const OAUTH_PROVIDERS = Object.keys(socialProviders) as OAuthProvider[];
 
-// public URL of the dashboard, for links in emails
-const APP_URL = (process.env.BETTER_AUTH_URL ?? "http://localhost:3000").replace(/\/$/, "");
-
 export const auth = betterAuth({
   database: drizzleAdapter(db, { provider: "pg", schema }),
   emailAndPassword: {
@@ -93,12 +92,13 @@ export const auth = betterAuth({
       create: {
         // every way in (email, GitHub, Google) creates the user here; the admin CLI writes to the database directly
         before: async (user) => {
-          if (!signupAllowed(user.email))
+          if (!(await signupAllowed(user.email)))
             throw new APIError("FORBIDDEN", { code: "SIGNUP_NOT_ALLOWED", message: "Sign up is not allowed" });
         },
         // API keys and usage belong to organizations: everyone starts with a personal one
         after: async (user) => {
           await ensurePersonalOrganization(db, user);
+          await markSignupInvitationUsed(db, user.email);
         },
       },
     },
@@ -106,6 +106,12 @@ export const auth = betterAuth({
       create: {
         // a new session opens on the user's personal organization
         before: async (session) => {
+          const [state] = await db
+            .select({ disabledAt: schema.user.disabledAt })
+            .from(schema.user)
+            .where(eq(schema.user.id, session.userId));
+          if (state?.disabledAt)
+            throw new APIError("FORBIDDEN", { code: "ACCOUNT_DISABLED", message: "This account is disabled" });
           if (session.activeOrganizationId) return;
           const [u] = await db
             .select({ id: schema.user.id, name: schema.user.name })
