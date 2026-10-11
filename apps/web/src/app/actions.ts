@@ -22,7 +22,7 @@ import { clientIp } from "@/lib/client-ip";
 import { signInMethods } from "@/lib/data";
 import { db } from "@/lib/db";
 import { PASSWORD } from "@/lib/password";
-import { SIGNUP_DOMAINS, signupAllowed } from "@/lib/signup";
+import { signupAllowed, signupRefusal } from "@/lib/signup";
 import { hit, tooMany } from "@/lib/rate-limit";
 import { redis } from "@/lib/redis";
 import { verifyTurnstile } from "@/lib/turnstile";
@@ -57,13 +57,7 @@ export async function signUp(_: FormState, form: FormData): Promise<FormState> {
     .safeParse(Object.fromEntries(form));
   const values = keep(form, "name", "email");
   if (!parsed.success) return { error: parsed.error.issues[0]?.message, values };
-  if (!signupAllowed(parsed.data.email))
-    return {
-      error: SIGNUP_DOMAINS.length
-        ? `Sign up is limited to addresses at ${SIGNUP_DOMAINS.join(", ")}.`
-        : "Sign up is closed. Ask an administrator for an account.",
-      values,
-    };
+  if (!(await signupAllowed(parsed.data.email))) return { error: signupRefusal(), values };
   const ip = await clientIp();
   const wait = await hit("signUp", { ip });
   if (wait) return { error: tooMany(wait), values };
@@ -96,6 +90,8 @@ export async function signIn(_: FormState, form: FormData): Promise<FormState> {
   } catch (e) {
     if (!(e instanceof APIError)) throw e;
     // only reachable with the right password, so it does not reveal that the account exists
+    if (codeOf(e) === "ACCOUNT_DISABLED")
+      return { error: "This account is disabled. Contact the administrator of this instance.", values };
     if (codeOf(e) === "EMAIL_NOT_VERIFIED")
       return { error: `Confirm your email first. We sent a new link to ${parsed.data.email}.`, values };
     return { error: "Wrong email or password.", values };

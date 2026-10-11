@@ -22,6 +22,7 @@ follow [Semantic Versioning](https://semver.org/). Before 1.0, minor versions ma
 - Sign up modes (`open`, `closed`) and allowed email domains; SMTP or Resend email; optional email verification;
   breached-password check (Have I Been Pwned) with a switch for offline installs; Cloudflare Turnstile (optional);
   rate-limited sign in, sign up and resets; security headers.
-- Admin CLI (`bun run admin`): accounts, keys, usage report as CSV.
+- Admin page for `ADMIN_EMAILS` and admin CLI (`bun run admin`): create, confirm, disable and delete accounts, sign up
+  invitations, organization quotas, usage; invite-only sign up (`SIGNUP_MODE=invite`).
 - Mock basal server (`bun run mock`) for development and tests.
 - Docker images and docker compose profiles (`mock`, `gpu`, `app`); Modal template for serverless GPU.

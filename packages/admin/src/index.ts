@@ -9,12 +9,16 @@ import {
   ensurePersonalOrganization,
   eq,
   gte,
+  gt,
   inArray,
+  invitation,
   isNull,
   isPersonalOrganization,
   member,
   organization,
   organizationQuotas,
+  session,
+  signupInvitations,
   sql,
   usageEvents,
   user,
@@ -23,9 +27,9 @@ import { apiKeyCacheKey } from "@basal/shared/keys";
 import { hashPassword } from "better-auth/crypto";
 import type { Redis } from "ioredis";
 
-// Administration straight on the database, for what the dashboard does not do (yet): accounts on a closed instance,
-// confirming or removing accounts, adding members, revoking keys, usage over all organizations. Works whatever
-// SIGNUP_MODE says.
+// Instance administration straight on the database, shared by the admin CLI and the dashboard's admin page: accounts
+// (also on a closed instance), confirming, disabling or removing them, sign up invitations, members, keys, quotas and
+// usage over all organizations. Works whatever SIGNUP_MODE says.
 
 const MIN_PASSWORD = 10;
 const ROLES = ["member", "admin", "owner"] as const;
@@ -54,6 +58,7 @@ export async function listUsers({ db }: Ctx) {
       email: user.email,
       name: user.name,
       verified: user.emailVerified,
+      disabled: user.disabledAt,
       created: user.createdAt,
       organizations: sql<number>`(select count(*)::int from member m where m.user_id = "user".id)`,
     })
@@ -86,6 +91,7 @@ export async function addUser(ctx: Ctx, email: string, opts: { name?: string; pa
     });
   });
   await ensurePersonalOrganization(db, { id, name });
+  await markSignupInvitationUsed(db, address);
   return { email: address, password: opts.password ? undefined : password };
 }
 
@@ -117,6 +123,7 @@ export async function deleteUser(ctx: Ctx, email: string) {
 export async function listOrgs({ db }: Ctx) {
   const rows = await db
     .select({
+      id: organization.id,
       slug: organization.slug,
       name: organization.name,
       created: organization.createdAt,
@@ -221,4 +228,89 @@ export async function setOrgQuota(ctx: Ctx, orgRef: string, quota: { requests?: 
   if (keys.length) await ctx.redis.del(...keys.map((k) => apiKeyCacheKey(k.hash)));
   const [row] = await ctx.db.select().from(organizationQuotas).where(eq(organizationQuotas.organizationId, org.id));
   return { requests: row?.monthlyRequests ?? null, tokens: row?.monthlyTokens ?? null };
+}
+
+/** Disabled accounts cannot sign in; their sessions end at once. Their organizations and API keys stay. */
+export async function disableUser(ctx: Ctx, email: string) {
+  const u = await userByEmail(ctx, email);
+  await ctx.db.update(user).set({ disabledAt: new Date(), updatedAt: new Date() }).where(eq(user.id, u.id));
+  await ctx.db.delete(session).where(eq(session.userId, u.id));
+}
+
+export async function enableUser(ctx: Ctx, email: string) {
+  const u = await userByEmail(ctx, email);
+  await ctx.db.update(user).set({ disabledAt: null, updatedAt: new Date() }).where(eq(user.id, u.id));
+}
+
+const INVITATION_DAYS = 14;
+
+/** An invitation to create an account (SIGNUP_MODE=invite); a pending one for the same address is replaced. */
+export async function inviteToSignUp(ctx: Ctx, email: string, invitedBy?: string) {
+  const address = email.trim().toLowerCase();
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(address)) throw new Error(`not an email address: ${email}`);
+  const [taken] = await ctx.db.select({ id: user.id }).from(user).where(eq(user.email, address));
+  if (taken) throw new Error(`${address} already has an account`);
+  await ctx.db
+    .delete(signupInvitations)
+    .where(and(eq(signupInvitations.email, address), isNull(signupInvitations.usedAt)));
+  const [row] = await ctx.db
+    .insert(signupInvitations)
+    .values({ email: address, invitedBy, expiresAt: new Date(Date.now() + INVITATION_DAYS * 86_400_000) })
+    .returning();
+  return row!;
+}
+
+export async function listSignupInvitations({ db }: Ctx) {
+  return db
+    .select({ id: signupInvitations.id, email: signupInvitations.email, expires: signupInvitations.expiresAt })
+    .from(signupInvitations)
+    .where(and(isNull(signupInvitations.usedAt), gt(signupInvitations.expiresAt, new Date())))
+    .orderBy(desc(signupInvitations.createdAt));
+}
+
+export async function revokeSignupInvitation({ db }: Ctx, id: string) {
+  await db.delete(signupInvitations).where(and(eq(signupInvitations.id, id), isNull(signupInvitations.usedAt)));
+}
+
+/** Whether an address may sign up on an invite-only instance: a sign up invitation or an organization's. */
+export async function hasPendingInvitation(db: Db, email: string): Promise<boolean> {
+  const address = email.trim().toLowerCase();
+  const now = new Date();
+  const [signup] = await db
+    .select({ id: signupInvitations.id })
+    .from(signupInvitations)
+    .where(
+      and(eq(signupInvitations.email, address), isNull(signupInvitations.usedAt), gt(signupInvitations.expiresAt, now)),
+    )
+    .limit(1);
+  if (signup) return true;
+  const [org] = await db
+    .select({ id: invitation.id })
+    .from(invitation)
+    .where(and(eq(invitation.email, address), eq(invitation.status, "pending"), gt(invitation.expiresAt, now)))
+    .limit(1);
+  return !!org;
+}
+
+export async function markSignupInvitationUsed(db: Db, email: string) {
+  await db
+    .update(signupInvitations)
+    .set({ usedAt: new Date() })
+    .where(and(eq(signupInvitations.email, email.trim().toLowerCase()), isNull(signupInvitations.usedAt)));
+}
+
+/** This calendar month's (UTC) requests and input tokens per organization. */
+export async function monthUsageByOrg({ db }: Ctx) {
+  const now = new Date();
+  const since = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  const rows = await db
+    .select({
+      organizationId: usageEvents.organizationId,
+      requests: sql<number>`count(*)::int`,
+      tokens: sql<string>`sum(${usageEvents.inputTokens})::bigint`,
+    })
+    .from(usageEvents)
+    .where(gte(usageEvents.createdAt, since))
+    .groupBy(usageEvents.organizationId);
+  return new Map(rows.map((r) => [r.organizationId, { requests: r.requests, tokens: Number(r.tokens) }]));
 }

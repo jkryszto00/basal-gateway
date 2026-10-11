@@ -1,6 +1,18 @@
 // Runs against Postgres and Redis from docker compose (`bun run db:up && bun run db:migrate`).
 import { afterAll, describe, expect, it } from "bun:test";
-import { account, apiKeys, createDb, eq, member, organization, usageEvents, user } from "@basal/db";
+import {
+  account,
+  apiKeys,
+  createDb,
+  eq,
+  member,
+  organization,
+  session,
+  signupInvitations,
+  sql,
+  usageEvents,
+  user,
+} from "@basal/db";
 import { apiKeyCacheKey, generateApiKey } from "@basal/shared/keys";
 import { verifyPassword } from "better-auth/crypto";
 import { Redis } from "ioredis";
@@ -8,6 +20,12 @@ import {
   addMember,
   addUser,
   deleteUser,
+  disableUser,
+  enableUser,
+  hasPendingInvitation,
+  inviteToSignUp,
+  listSignupInvitations,
+  revokeSignupInvitation,
   listKeys,
   listOrgs,
   listUsers,
@@ -15,7 +33,7 @@ import {
   setOrgQuota,
   usageReport,
   verifyUser,
-} from "./commands";
+} from "./index";
 
 const db = createDb(process.env.DATABASE_URL ?? "postgres://basal:basal@localhost:5432/basal");
 const redis = new Redis(process.env.REDIS_TEST_URL ?? "redis://localhost:6379/15");
@@ -35,6 +53,7 @@ const personalOrg = async (address: string) =>
   )[0]!;
 
 afterAll(async () => {
+  await db.delete(signupInvitations).where(sql`${signupInvitations.email} like ${`%${run}@example.com`}`);
   await db.delete(organization).where(eq(organization.slug, teamSlug));
   for (const address of [email, other]) {
     const [u] = await db.select().from(user).where(eq(user.email, address));
@@ -153,5 +172,48 @@ describe("admin commands", () => {
     expect(await db.select().from(organization).where(eq(organization.id, team.id))).toHaveLength(1); // shared stays
     expect(await redis.exists(apiKeyCacheKey(k.hash))).toBe(0);
     await expect(deleteUser(ctx, email)).rejects.toThrow("no account");
+  });
+});
+
+describe("sign up invitations and disabled accounts", () => {
+  const invited = `invited-${run}@example.com`;
+
+  it("invites an address once, counts it as pending, and refuses addresses with an account", async () => {
+    await inviteToSignUp(ctx, invited.toUpperCase());
+    await inviteToSignUp(ctx, invited); // replaces the pending one
+    expect((await listSignupInvitations(ctx)).filter((i) => i.email === invited)).toHaveLength(1);
+    expect(await hasPendingInvitation(db, invited)).toBe(true);
+    expect(await hasPendingInvitation(db, `nobody-${run}@example.com`)).toBe(false);
+    await expect(inviteToSignUp(ctx, other)).rejects.toThrow("already has an account");
+  });
+
+  it("uses up the invitation when the account is created", async () => {
+    await addUser(ctx, invited);
+    expect(await hasPendingInvitation(db, invited)).toBe(false);
+    const [inv] = await listSignupInvitations(ctx).then((l) => l.filter((i) => i.email === invited));
+    expect(inv).toBeUndefined();
+  });
+
+  it("revokes an invitation", async () => {
+    const i = await inviteToSignUp(ctx, `revoked-${run}@example.com`);
+    await revokeSignupInvitation(ctx, i.id);
+    expect(await hasPendingInvitation(db, `revoked-${run}@example.com`)).toBe(false);
+  });
+
+  it("disables an account, ending its sessions, and enables it again", async () => {
+    const id = await userId(invited);
+    await db.insert(session).values({
+      id: crypto.randomUUID(),
+      token: crypto.randomUUID(),
+      userId: id,
+      expiresAt: new Date(Date.now() + 86_400_000),
+    });
+    await disableUser(ctx, invited);
+    expect((await db.select().from(user).where(eq(user.id, id)))[0]?.disabledAt).not.toBeNull();
+    expect(await db.select().from(session).where(eq(session.userId, id))).toHaveLength(0);
+    expect((await listUsers(ctx)).find((u) => u.email === invited)?.disabled).not.toBeNull();
+    await enableUser(ctx, invited);
+    expect((await db.select().from(user).where(eq(user.id, id)))[0]?.disabledAt).toBeNull();
+    await deleteUser(ctx, invited);
   });
 });

@@ -34,7 +34,7 @@ web (Next.js) ── sign up, API keys, usage, balance, settings
   per model and per request. Usage is measured in units, not money: what a decision costs depends on your hardware, so turn
   it into your own rates or internal charges; [hooks](#extending) let a build add pricing.
 - **Accounts**: email and password with optional email confirmation and password reset (SMTP or Resend), optional
-  GitHub and Google sign in, open or closed sign up and allowed email domains, breached-password check (Have I Been
+  GitHub and Google sign in, open, invite-only or closed sign up and allowed email domains, an admin page, breached-password check (Have I Been
   Pwned), optional Cloudflare Turnstile, rate-limited sign in, sign up and resets, password change and account
   deletion.
 - **Hardened defaults**: Content Security Policy and anti-framing headers on the dashboard (HSTS when served over
@@ -103,14 +103,20 @@ The response is basal's, plus a request `id`:
 
 ## Administration
 
-`bun run admin` works on the database directly, whatever `SIGNUP_MODE` says, e.g. to create the first accounts of a
-closed instance:
+Accounts listed in `ADMIN_EMAILS` see an **Admin** page in the dashboard: create accounts (the password is shown
+once), confirm, disable (no sign in; their organizations' keys keep working) and delete them, invite addresses to
+sign up (`SIGNUP_MODE=invite`), and see every organization's usage this month and set its monthly quota.
+
+The same and more from the command line: `bun run admin` works on the database directly, whatever `SIGNUP_MODE`
+says, e.g. to create the first accounts of a closed instance:
 
 ```bash
 bun run admin users                                   # accounts and how many organizations they are in
 bun run admin users add ana@acme.com --name Ana       # confirmed account with its personal organization;
                                                       # prints a generated password once
 bun run admin users verify ana@acme.com               # mark an email as confirmed
+bun run admin users disable ana@acme.com              # no sign in (enable to undo)
+bun run admin users invite ana@acme.com               # invitation to sign up; prints the link to send
 bun run admin users delete ana@acme.com --yes         # with the organizations only it belongs to
 bun run admin keys <org>                              # an organization's API keys (slug or id)
 bun run admin keys revoke <key-id>                    # revoke a key at once
@@ -210,8 +216,9 @@ All settings are environment variables, read from `.env` at the repository root 
 | `ORG_DAILY_REQUESTS` | `0` | requests per UTC day per organization, `0` = unlimited |
 | `ORG_MONTHLY_REQUESTS`, `ORG_MONTHLY_TOKENS` | `0`, `0` | default monthly quota (UTC month) of organizations without their own, `0` = none |
 | `APP_NAME` | `basal gateway` | shown in the dashboard and emails |
-| `SIGNUP_MODE` | `open` | `closed`: no new accounts (create them with the admin CLI); existing ones still sign in |
-| `SIGNUP_ALLOWED_DOMAINS` | | e.g. `acme.com,acme.pl`: only these email domains may sign up (email and OAuth) |
+| `SIGNUP_MODE` | `open` | `invite`: only invited addresses (by an admin or to an organization); `closed`: no sign up, admins create accounts; existing accounts still sign in |
+| `SIGNUP_ALLOWED_DOMAINS` | | with `open`: only these email domains may sign up, e.g. `acme.com,acme.pl` (email and OAuth) |
+| `ADMIN_EMAILS` | | instance admins: `ana@acme.com,@acme.com` (`@domain` covers a domain); they get the admin page |
 | `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL` | | session secret and the dashboard's public URL |
 | `GATEWAY_PUBLIC_URL` | `http://localhost:8787` | gateway URL shown in the dashboard |
 | `GATEWAY_INTERNAL_URL` | `GATEWAY_PUBLIC_URL` | where the dashboard reaches the gateway for its model list |

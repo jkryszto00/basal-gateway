@@ -2,6 +2,7 @@ import { AccountMenu } from "@/components/account-menu";
 import { Logo } from "@/components/logo";
 import { NavLink } from "@/components/nav-link";
 import { OrgSwitcher } from "@/components/org-switcher";
+import { isInstanceAdmin } from "@/lib/admin";
 import { myOrganizations, requireOrg } from "@/lib/auth";
 
 export default async function DashboardLayout({ children }: LayoutProps<"/dashboard">) {
@@ -18,6 +19,7 @@ export default async function DashboardLayout({ children }: LayoutProps<"/dashbo
             <NavLink href="/dashboard/keys">API keys</NavLink>
             <NavLink href="/dashboard/usage">Usage</NavLink>
             <NavLink href="/dashboard/organization">Organization</NavLink>
+            {isInstanceAdmin(user.email) && <NavLink href="/dashboard/admin">Admin</NavLink>}
           </nav>
           <div className="ml-auto">
             <AccountMenu name={user.name} email={user.email} />

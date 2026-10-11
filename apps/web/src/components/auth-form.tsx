@@ -71,6 +71,7 @@ export function AuthForm({
   oauth,
   signupOpen = true,
   next,
+  defaultEmail,
 }: {
   mode: "login" | "signup";
   action: Action;
@@ -78,6 +79,7 @@ export function AuthForm({
   oauth?: React.ReactNode; // GitHub / Google buttons, above the email form
   signupOpen?: boolean; // the login page links to sign up only when it is open
   next?: string; // where to go after signing in
+  defaultEmail?: string; // e.g. from an invitation link
 }) {
   const [state, formAction, pending] = useActionState(action, undefined);
   const signup = mode === "signup";
@@ -100,7 +102,7 @@ export function AuthForm({
           </label>
         )}
         {next && <input type="hidden" name="next" value={next} />}
-        <EmailField defaultValue={state?.values?.email} />
+        <EmailField defaultValue={state?.values?.email ?? defaultEmail} />
         <label className="block space-y-1">
           <span className="flex items-baseline justify-between text-sm">
             Password
