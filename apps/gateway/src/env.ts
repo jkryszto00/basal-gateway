@@ -59,7 +59,8 @@ const base = z.object({
         return z.NEVER;
       }
     })
-    .pipe(z.record(z.string(), upstreamConfig)),
+    // one server per model, or a list in order of preference (overflow and failover)
+    .pipe(z.record(z.string(), z.union([upstreamConfig, z.array(upstreamConfig).min(1)]))),
 });
 
 const schema = base

@@ -253,14 +253,8 @@ export function createApp({ db, redis, upstreams, orgLimits, defaultModel, hooks
       );
     }
     try {
-      if (!upstream.tryAcquire()) return fail("overloaded", "model is at capacity, retry shortly", 503);
-      let result;
-      try {
-        result = await upstream.decide(body);
-      } finally {
-        upstream.release();
-      }
-
+      const result = await upstream.decide(body);
+      if (result.kind === "busy") return fail("overloaded", "model is at capacity, retry shortly", 503);
       if (result.kind === "timeout") return fail("upstream_timeout", "inference timed out", 504);
       if (result.kind === "network") {
         console.error(`[${requestId}] upstream ${model} unreachable: ${result.error}`);
