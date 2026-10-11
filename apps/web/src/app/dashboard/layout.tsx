@@ -1,19 +1,23 @@
 import { AccountMenu } from "@/components/account-menu";
 import { Logo } from "@/components/logo";
 import { NavLink } from "@/components/nav-link";
-import { requireUser } from "@/lib/auth";
+import { OrgSwitcher } from "@/components/org-switcher";
+import { myOrganizations, requireOrg } from "@/lib/auth";
 
 export default async function DashboardLayout({ children }: LayoutProps<"/dashboard">) {
-  const user = await requireUser();
+  const { user, org } = await requireOrg();
+  const orgs = await myOrganizations(user.id);
   return (
     <div className="flex flex-1 flex-col">
       <header className="border-b border-line">
         <div className="mx-auto flex w-full max-w-5xl flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3">
           <Logo />
+          <OrgSwitcher active={org} orgs={orgs} />
           <nav className="flex gap-1">
             <NavLink href="/dashboard">Overview</NavLink>
             <NavLink href="/dashboard/keys">API keys</NavLink>
             <NavLink href="/dashboard/usage">Usage</NavLink>
+            <NavLink href="/dashboard/organization">Organization</NavLink>
           </nav>
           <div className="ml-auto">
             <AccountMenu name={user.name} email={user.email} />

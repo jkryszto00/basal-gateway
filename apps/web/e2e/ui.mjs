@@ -207,6 +207,91 @@ await page.fill('input[name="email"]', email);
 await page.fill('input[name="password"]', "third-horse-battery");
 await submit();
 if (!(await alert()).includes("Wrong email or password")) throw new Error("deleted account signed in");
+// Organizations: create one, invite a second account, accept, roles, switching, delete
+async function signUpAndConfirm(address, name) {
+  await page.goto(`${base}/signup`);
+  await page.fill('input[name="name"]', name);
+  await page.fill('input[name="email"]', address);
+  await page.fill('input[name="password"]', "correct-horse-battery");
+  await turnstileDone();
+  const at = logSize();
+  await submit();
+  await page.getByText("Check your inbox").waitFor();
+  await page.goto(await emailLink(address, at));
+  await page.waitForURL(/\/dashboard/);
+}
+const owner = `owner-${Date.now()}@example.com`;
+const teammate = `teammate-${Date.now()}@example.com`;
+await signUpAndConfirm(owner, "Owner");
+await page.goto(`${base}/dashboard/organization/new`);
+await page.fill('input[name="name"]', "E2E Team");
+await submit();
+await page.waitForURL(`${base}/dashboard/organization`);
+if (!(await page.locator("h1").textContent()).includes("E2E Team")) throw new Error("new organization not active");
+await page.goto(`${base}/dashboard/keys`);
+if (!(await page.getByText("No keys yet.").count())) throw new Error("a new organization shares keys");
+await page.fill('input[name="name"]', "team-key");
+await page.click("text=Create key");
+await page.locator("code", { hasText: KEY_PREFIX }).waitFor();
+step("organization created and active, with its own keys");
+
+await page.goto(`${base}/dashboard/organization`);
+await page.fill('input[type="email"]', teammate);
+mark = logSize();
+await page.getByRole("button", { name: "Invite" }).click();
+await page.locator('main [role="status"]', { hasText: `Invitation sent to ${teammate}` }).waitFor();
+const invite = await emailLink(teammate, mark);
+if (!/\/invitations\/[^/]+$/.test(invite)) throw new Error(`invitation link ${invite}`);
+step("invitation emailed");
+
+await signOut();
+await page.waitForURL(`${base}/login`);
+await page.goto(invite);
+await page.waitForURL(/\/login\?next=/); // signed out: sign in first, then back to the invitation
+await signUpAndConfirm(teammate, "Teammate");
+await page.getByText("You are invited to").waitFor();
+await page.click("text=View invitation");
+await page.getByRole("button", { name: "Accept" }).click();
+await page.waitForURL(`${base}/dashboard?joined=1`);
+if (!(await status()).includes("You joined E2E Team")) throw new Error("no joined banner");
+step("second account accepted the invitation");
+
+await page.goto(`${base}/dashboard/keys`);
+await page.getByText("team-key").waitFor();
+if (await page.getByRole("button", { name: "Revoke" }).count()) throw new Error("a member can revoke another's key");
+await page.click('button[aria-label="Organization"]');
+await page.getByRole("option", { name: /personal/ }).click();
+await page.locator('button[aria-label="Organization"]', { hasText: "personal" }).waitFor();
+await page.goto(`${base}/dashboard/keys`);
+if (await page.getByText("team-key").count()) throw new Error("personal organization shows team keys");
+step("member sees team keys without revoking them; switching organizations");
+
+await page.goto(`${base}/dashboard/settings`);
+const leave = page.locator("form", { hasText: "Delete account" });
+await leave.locator('input[name="confirm"]').fill(teammate);
+await leave.locator('input[name="password"]').fill("correct-horse-battery");
+await Promise.all([page.waitForURL(`${base}/login?deleted=1`), leave.locator('button[type="submit"]').click()]);
+await page.fill('input[name="email"]', owner);
+await page.fill('input[name="password"]', "correct-horse-battery");
+await Promise.all([page.waitForURL(`${base}/dashboard`), submit()]);
+await page.click('button[aria-label="Organization"]');
+await page.getByRole("option", { name: /E2E Team/ }).click();
+await page.locator('button[aria-label="Organization"]', { hasText: "E2E Team" }).waitFor();
+await page.goto(`${base}/dashboard/organization`);
+const memberRows = await page.locator("tbody tr").allInnerTexts();
+if (memberRows.length !== 1) throw new Error(`members after deletion: ${JSON.stringify(memberRows)}`);
+await page.fill('input[name="confirm"]', "E2E Team");
+await Promise.all([
+  page.waitForURL(`${base}/dashboard`),
+  page.getByRole("button", { name: "Delete organization" }).click(),
+]);
+await page.click('button[aria-label="Organization"]');
+if (await page.getByRole("option", { name: /E2E Team/ }).count()) throw new Error("organization not deleted");
+await page.keyboard.press("Escape");
+await signOut();
+await page.waitForURL(`${base}/login`);
+step("member left by deleting their account; owner deleted the organization");
+
 const victim = `victim-${Date.now()}@example.com`;
 let limited = "";
 for (let i = 0; i < 11 && !limited.startsWith("Too many"); i++) {

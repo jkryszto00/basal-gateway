@@ -76,6 +76,18 @@ export const verificationEmail = (to: string, url: string) =>
     "The link expires in 24 hours. If you did not create an account, ignore this email.",
   );
 
+// The organization's name and the inviter are left out on purpose (both chosen by users); the invitation page shows
+// them once the recipient has signed in.
+export const invitationEmail = (to: string, url: string) =>
+  linkEmail(
+    to,
+    `You are invited to an organization on ${APP_NAME}`,
+    `Someone invited you to join their organization on ${APP_NAME}, to use its API keys and see its usage.`,
+    "See the invitation",
+    url,
+    "The invitation expires in 7 days. Sign in or create an account with this email address to accept it.",
+  );
+
 export const resetPasswordEmail = (to: string, url: string) =>
   linkEmail(
     to,

@@ -31,6 +31,8 @@ export const RULES = {
   // signed in: per account email, guessing the current password from a stolen session
   changePassword: { ip: [], email: [{ max: 5, windowSec: 15 * MINUTE }] },
   deleteAccount: { ip: [], email: [{ max: 5, windowSec: 15 * MINUTE }] },
+  // invitations email strangers: per inviting account
+  invite: { ip: [{ max: 30, windowSec: HOUR }], email: [{ max: 20, windowSec: HOUR }] },
 } satisfies Record<string, { ip: Omit<Rule, "by" | "value">[]; email: Omit<Rule, "by" | "value">[] }>;
 
 // emails are hashed so Redis holds no addresses

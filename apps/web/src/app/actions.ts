@@ -12,7 +12,9 @@ import {
   OAUTH_PROVIDERS,
   type OAuthProvider,
   PASSWORD_COMPROMISED,
+  canManage,
   passwordBreached,
+  requireOrg,
   requireUser,
 } from "@/lib/auth";
 import { EMAIL_VERIFICATION } from "@/lib/email";
@@ -98,7 +100,12 @@ export async function signIn(_: FormState, form: FormData): Promise<FormState> {
       return { error: `Confirm your email first. We sent a new link to ${parsed.data.email}.`, values };
     return { error: "Wrong email or password.", values };
   }
-  redirect("/dashboard");
+  redirect(safeNext(form.get("next")));
+}
+
+/** Where to go after signing in: a path on this site (e.g. an invitation), never another origin. */
+function safeNext(next: FormDataEntryValue | null): string {
+  return typeof next === "string" && /^\/(?!\/)[\w\-./?=&]*$/.test(next) ? next : "/dashboard";
 }
 
 /** Starts GitHub / Google sign in; new accounts are created on the way back (/api/auth/callback/<provider>). */
@@ -234,39 +241,52 @@ export async function deleteAccount(_: FormState, form: FormData): Promise<FormS
     if (codeOf(e) === "INVALID_PASSWORD") return { error: "Wrong password." };
     if (codeOf(e) === "SESSION_EXPIRED")
       return { error: "For your security, sign out and sign in again, then delete the account." };
+    if (codeOf(e) === "SOLE_OWNER")
+      return { error: "You are the only owner of a shared organization: make another member an owner first." };
     return { error: "We could not delete the account. Try again in a moment." };
   }
   redirect("/login?deleted=1");
 }
 
-const MAX_ACTIVE_KEYS = 10;
+const MAX_ACTIVE_KEYS = 20;
 
 export type CreateKeyState = { error?: string; key?: string; name?: string } | undefined;
 
+/** Any member can create keys for the active organization. */
 export async function createKey(_: CreateKeyState, form: FormData): Promise<CreateKeyState> {
-  const user = await requireUser();
+  const { user, org } = await requireOrg();
   const name = z.string().trim().min(1).max(64).safeParse(form.get("name"));
   if (!name.success) return { error: "Name the key (1–64 characters)" };
 
   const [active] = await db
     .select({ n: count() })
     .from(apiKeys)
-    .where(and(eq(apiKeys.userId, user.id), isNull(apiKeys.revokedAt)));
-  if ((active?.n ?? 0) >= MAX_ACTIVE_KEYS) return { error: `At most ${MAX_ACTIVE_KEYS} active keys` };
+    .where(and(eq(apiKeys.organizationId, org.id), isNull(apiKeys.revokedAt)));
+  if ((active?.n ?? 0) >= MAX_ACTIVE_KEYS) return { error: `At most ${MAX_ACTIVE_KEYS} active keys per organization` };
 
   const k = generateApiKey();
-  await db.insert(apiKeys).values({ userId: user.id, name: name.data, hash: k.hash, prefix: k.prefix });
+  await db
+    .insert(apiKeys)
+    .values({ organizationId: org.id, createdBy: user.id, name: name.data, hash: k.hash, prefix: k.prefix });
   revalidatePath("/dashboard/keys");
   return { key: k.key, name: name.data }; // shown once, never stored
 }
 
+/** Owners and admins revoke any key of the organization, members only their own. */
 export async function revokeKey(form: FormData) {
-  const user = await requireUser();
+  const { user, org } = await requireOrg();
   const id = z.uuid().parse(form.get("id"));
   const [row] = await db
     .update(apiKeys)
     .set({ revokedAt: new Date() })
-    .where(and(eq(apiKeys.id, id), eq(apiKeys.userId, user.id), isNull(apiKeys.revokedAt)))
+    .where(
+      and(
+        eq(apiKeys.id, id),
+        eq(apiKeys.organizationId, org.id),
+        isNull(apiKeys.revokedAt),
+        ...(canManage(org) ? [] : [eq(apiKeys.createdBy, user.id)]),
+      ),
+    )
     .returning({ hash: apiKeys.hash });
   if (row) await redis.del(apiKeyCacheKey(row.hash)); // the gateway stops accepting it immediately
   revalidatePath("/dashboard/keys");

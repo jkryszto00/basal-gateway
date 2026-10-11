@@ -70,12 +70,14 @@ export function AuthForm({
   turnstileSiteKey,
   oauth,
   signupOpen = true,
+  next,
 }: {
   mode: "login" | "signup";
   action: Action;
   turnstileSiteKey?: string;
   oauth?: React.ReactNode; // GitHub / Google buttons, above the email form
   signupOpen?: boolean; // the login page links to sign up only when it is open
+  next?: string; // where to go after signing in
 }) {
   const [state, formAction, pending] = useActionState(action, undefined);
   const signup = mode === "signup";
@@ -97,6 +99,7 @@ export function AuthForm({
             />
           </label>
         )}
+        {next && <input type="hidden" name="next" value={next} />}
         <EmailField defaultValue={state?.values?.email} />
         <label className="block space-y-1">
           <span className="flex items-baseline justify-between text-sm">

@@ -1,21 +1,49 @@
 import Link from "next/link";
 import { QuickStart } from "@/components/quick-start";
 import { Card, Stat } from "@/components/ui";
-import { usageSummary } from "@/lib/data";
+import { requireOrg } from "@/lib/auth";
+import { myInvitations, usageSummary } from "@/lib/data";
 import { listModels, type ModelInfo } from "@/lib/models";
 
 const API_URL = process.env.GATEWAY_PUBLIC_URL ?? "http://localhost:8787";
 
 export default async function Overview({ searchParams }: PageProps<"/dashboard">) {
-  const [{ welcome }, usage, models] = await Promise.all([searchParams, usageSummary(30), listModels()]);
+  const [{ welcome, joined }, { org }, usage, models, invitations] = await Promise.all([
+    searchParams,
+    requireOrg(),
+    usageSummary(30),
+    listModels(),
+    myInvitations(),
+  ]);
   const defaultModel = models?.find((m) => m.default)?.name;
 
   return (
     <div className="space-y-8">
       <div>
         <h1 className="text-xl font-semibold">Overview</h1>
-        <p className="text-sm text-muted">Last 30 days.</p>
+        <p className="text-sm text-muted">{org.name}, last 30 days.</p>
       </div>
+
+      {joined !== undefined && (
+        <p role="status" className="rounded-md border border-accent/40 bg-accent/5 p-3 text-sm">
+          You joined {org.name}. Its API keys and usage are below; switch organizations at the top.
+        </p>
+      )}
+
+      {invitations.map((i) => (
+        <p
+          key={i.id}
+          className="flex items-center justify-between gap-3 rounded-md border border-line bg-card p-3 text-sm"
+        >
+          <span>
+            You are invited to <strong>{i.organization}</strong> as {i.role === "admin" ? "an" : "a"}{" "}
+            {i.role ?? "member"}.
+          </span>
+          <Link href={`/invitations/${i.id}`} className="shrink-0 text-fg underline underline-offset-4">
+            View invitation
+          </Link>
+        </p>
+      ))}
 
       {welcome !== undefined && (
         <p role="status" className="rounded-md border border-accent/40 bg-accent/5 p-3 text-sm">
