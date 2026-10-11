@@ -440,6 +440,93 @@ describe("POST /v1/systemone", () => {
     await db.delete(user).where(eq(user.id, owner));
   });
 
+  it("reports the organization's usage over a period, grouped as asked", async () => {
+    const owner = `test-${crypto.randomUUID()}`; // a fresh organization, so the numbers are known
+    await db.insert(user).values({ id: owner, name: "Usage", email: `${owner}@example.com` });
+    const org = await ensurePersonalOrganization(db, { id: owner, name: "Usage" });
+    const k = generateApiKey();
+    const [row] = await db
+      .insert(apiKeys)
+      .values({ organizationId: org, createdBy: owner, name: "billing", hash: k.hash, prefix: k.prefix })
+      .returning({ id: apiKeys.id });
+    const event = {
+      organizationId: org,
+      apiKeyId: row!.id,
+      questions: 2,
+      branches: 3,
+      upstreamLatencyMs: 1,
+      totalLatencyMs: 2,
+    };
+    await db.insert(usageEvents).values([
+      {
+        ...event,
+        id: crypto.randomUUID(),
+        model: "basal-1.5",
+        inputTokens: 100,
+        createdAt: new Date("2026-03-01T10:00:00Z"),
+      },
+      {
+        ...event,
+        id: crypto.randomUUID(),
+        model: "basal-1.5",
+        inputTokens: 50,
+        createdAt: new Date("2026-03-01T23:00:00Z"),
+      },
+      {
+        ...event,
+        id: crypto.randomUUID(),
+        model: "basal-1.5-mini",
+        inputTokens: 10,
+        createdAt: new Date("2026-03-02T08:00:00Z"),
+      },
+      {
+        ...event,
+        id: crypto.randomUUID(),
+        model: "basal-1.5",
+        inputTokens: 999,
+        createdAt: new Date("2026-04-01T00:00:00Z"),
+      },
+    ]);
+    const get = (q: string) => app.request(`/v1/usage?${q}`, { headers: { authorization: `Bearer ${k.key}` } });
+
+    const byDay = await (await get("from=2026-03-01&to=2026-03-31")).json();
+    expect(byDay).toMatchObject({ organization_id: org, group_by: ["day"], to: "2026-04-01T00:00:00.000Z" });
+    expect(byDay.data).toEqual([
+      { day: "2026-03-01", requests: 2, decisions: 4, branches: 6, input_tokens: 150 },
+      { day: "2026-03-02", requests: 1, decisions: 2, branches: 3, input_tokens: 10 },
+    ]);
+    const byModelKey = await (await get("from=2026-03-01&to=2026-03-31&group_by=model,key")).json();
+    expect(byModelKey.data).toEqual([
+      {
+        model: "basal-1.5",
+        key: "billing",
+        key_prefix: k.prefix,
+        requests: 2,
+        decisions: 4,
+        branches: 6,
+        input_tokens: 150,
+      },
+      {
+        model: "basal-1.5-mini",
+        key: "billing",
+        key_prefix: k.prefix,
+        requests: 1,
+        decisions: 2,
+        branches: 3,
+        input_tokens: 10,
+      },
+    ]);
+    const total = await (await get("from=2026-03-01&to=2026-04-01&group_by=")).json();
+    expect(total.data).toEqual([{ requests: 4, decisions: 8, branches: 12, input_tokens: 1159 }]);
+
+    expect((await get("from=2026-03-01&group_by=week")).status).toBe(400);
+    expect((await get("from=03/01/2026")).status).toBe(400);
+    expect((await get("from=2025-01-01&to=2026-12-31")).status).toBe(400); // over 366 days
+    expect((await app.request("/v1/usage")).status).toBe(401);
+    await db.delete(organization).where(eq(organization.id, org));
+    await db.delete(user).where(eq(user.id, owner));
+  });
+
   it("enforces per-key concurrency and upstream capacity", async () => {
     upstreamDelayMs = 300;
     const a = await newKey({ concurrencyLimit: 1 });
