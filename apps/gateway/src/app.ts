@@ -13,8 +13,8 @@ import { acquireSlot, checkDaily, checkRate, releaseSlot } from "./limits";
 import type { Upstream } from "./upstream";
 import { recordUsage, type UsageEvent } from "./usage";
 
-/** Limits per account, summed over all its API keys (10 keys x 60 rpm would otherwise allow 600 rpm). */
-export type UserLimits = {
+/** Limits per organization, summed over all its API keys (10 keys x 60 rpm would otherwise allow 600 rpm). */
+export type OrgLimits = {
   rpm: number;
   concurrency: number;
   /** requests per UTC day; 0 means no daily limit */
@@ -42,7 +42,7 @@ export type Deps = {
   db: Db;
   redis: Redis;
   upstreams: Map<string, Upstream>;
-  userLimits: UserLimits;
+  orgLimits: OrgLimits;
   /** model of requests that name none */
   defaultModel: string;
   hooks?: GatewayHooks;
@@ -83,7 +83,7 @@ const passthroughResponse = z.looseObject({ usage: anyUsage.optional() });
 const jsonObject = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
 
-export function createApp({ db, redis, upstreams, userLimits, defaultModel, hooks = {} }: Deps) {
+export function createApp({ db, redis, upstreams, orgLimits, defaultModel, hooks = {} }: Deps) {
   const app = new Hono();
 
   // JSON API: no framing, no MIME sniffing, no referrer; HSTS is ignored by browsers on plain HTTP
@@ -155,10 +155,10 @@ export function createApp({ db, redis, upstreams, userLimits, defaultModel, hook
     }
 
     const keyScope = `key:${key.keyId}` as const;
-    const userScope = `user:${key.userId}` as const;
+    const orgScope = `org:${key.organizationId}` as const;
     for (const [scope, rpm, of] of [
       [keyScope, key.rpmLimit, "this API key"],
-      [userScope, userLimits.rpm, "this account"],
+      [orgScope, orgLimits.rpm, "this organization"],
     ] as const) {
       const rate = await checkRate(redis, scope, rpm);
       if (!rate.ok) {
@@ -172,12 +172,12 @@ export function createApp({ db, redis, upstreams, userLimits, defaultModel, hook
     const refused = await hooks.beforeUpstream?.(ctx);
     if (refused) return refused;
 
-    if (userLimits.dailyRequests > 0) {
-      const daily = await checkDaily(redis, key.userId, userLimits.dailyRequests);
+    if (orgLimits.dailyRequests > 0) {
+      const daily = await checkDaily(redis, key.organizationId, orgLimits.dailyRequests);
       if (!daily.ok) {
         const res = fail(
           "daily_limit_reached",
-          `limit of ${userLimits.dailyRequests} requests per day for this account, resets at 00:00 UTC`,
+          `limit of ${orgLimits.dailyRequests} requests per day for this organization, resets at 00:00 UTC`,
           429,
         );
         res.headers.set("retry-after", String(daily.retryAfterS));
@@ -188,11 +188,11 @@ export function createApp({ db, redis, upstreams, userLimits, defaultModel, hook
     if (!(await acquireSlot(redis, keyScope, key.concurrencyLimit, requestId))) {
       return fail("concurrency_limited", `limit of ${key.concurrencyLimit} concurrent requests for this API key`, 429);
     }
-    if (!(await acquireSlot(redis, userScope, userLimits.concurrency, requestId))) {
+    if (!(await acquireSlot(redis, orgScope, orgLimits.concurrency, requestId))) {
       await releaseSlot(redis, keyScope, requestId);
       return fail(
         "concurrency_limited",
-        `limit of ${userLimits.concurrency} concurrent requests for this account`,
+        `limit of ${orgLimits.concurrency} concurrent requests for this organization`,
         429,
       );
     }
@@ -230,6 +230,7 @@ export function createApp({ db, redis, upstreams, userLimits, defaultModel, hook
       const totalMs = performance.now() - t0;
       const event: UsageEvent = {
         id: requestId,
+        organizationId: key.organizationId,
         userId: key.userId,
         apiKeyId: key.keyId,
         model,
@@ -248,7 +249,7 @@ export function createApp({ db, redis, upstreams, userLimits, defaultModel, hook
         { headers: { "x-request-id": requestId } },
       );
     } finally {
-      await Promise.all([releaseSlot(redis, keyScope, requestId), releaseSlot(redis, userScope, requestId)]);
+      await Promise.all([releaseSlot(redis, keyScope, requestId), releaseSlot(redis, orgScope, requestId)]);
     }
   };
 

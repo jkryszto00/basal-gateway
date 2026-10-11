@@ -1,9 +1,11 @@
-import { apiKeys, type Db, inArray, sql, usageEvents, user } from "@basal/db";
+import { apiKeys, type Db, inArray, organization, sql, usageEvents, user } from "@basal/db";
 import type { Redis } from "ioredis";
 
 export type UsageEvent = {
   id: string;
-  userId: string;
+  organizationId: string;
+  /** creator of the key, for usage per member */
+  userId: string | null;
   apiKeyId: string;
   model: string;
   inputTokens: number;
@@ -56,14 +58,24 @@ export class UsageFlusher {
     let events = raw.map((r) => JSON.parse(r) as UsageEvent);
     try {
       await this.db.transaction(async (tx) => {
-        // events of an account deleted meanwhile would fail the foreign key and block the queue for everyone
-        const ids = [...new Set(events.map((e) => e.userId))];
-        const live = new Set(
-          (await tx.select({ id: user.id }).from(user).where(inArray(user.id, ids))).map((u) => u.id),
+        // events of an organization deleted meanwhile would fail the foreign key and block the queue for everyone
+        const orgIds = [...new Set(events.map((e) => e.organizationId))];
+        const liveOrgs = new Set(
+          (await tx.select({ id: organization.id }).from(organization).where(inArray(organization.id, orgIds))).map(
+            (o) => o.id,
+          ),
         );
-        const dropped = events.length - (events = events.filter((e) => live.has(e.userId))).length;
-        if (dropped) console.warn(`usage flush: dropped ${dropped} events of deleted accounts`);
+        const dropped = events.length - (events = events.filter((e) => liveOrgs.has(e.organizationId))).length;
+        if (dropped) console.warn(`usage flush: dropped ${dropped} events of deleted organizations`);
         if (!events.length) return;
+        // a key creator who deleted their account: keep the event, without the member
+        const userIds = [...new Set(events.flatMap((e) => (e.userId ? [e.userId] : [])))];
+        const liveUsers = new Set(
+          userIds.length
+            ? (await tx.select({ id: user.id }).from(user).where(inArray(user.id, userIds))).map((u) => u.id)
+            : [],
+        );
+        events = events.map((e) => (e.userId && !liveUsers.has(e.userId) ? { ...e, userId: null } : e));
         await tx
           .insert(usageEvents)
           .values(events.map((e) => ({ ...e, createdAt: new Date(e.createdAt) })))

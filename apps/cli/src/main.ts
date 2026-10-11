@@ -2,18 +2,33 @@
 import { parseArgs } from "node:util";
 import { createDb } from "@basal/db";
 import { Redis } from "ioredis";
-import { addUser, type Ctx, deleteUser, listKeys, listUsers, revokeKey, usageReport, verifyUser } from "./commands";
+import {
+  addMember,
+  addUser,
+  type Ctx,
+  deleteUser,
+  listKeys,
+  listOrgs,
+  listUsers,
+  revokeKey,
+  usageReport,
+  verifyUser,
+} from "./commands";
 
 const HELP = `Usage: bun run admin <command>
 
   users                                   list accounts
   users add <email> [--name N] [--password P]
-                                          create an account with a confirmed email (prints a generated password)
+                                          create an account with a confirmed email and its personal organization
+                                          (prints a generated password)
   users verify <email>                    mark an account's email as confirmed
-  users delete <email> --yes              delete an account with its keys and usage
-  keys <email>                            list an account's API keys
+  users delete <email> --yes              delete an account with the organizations only it belongs to
+  orgs                                    list organizations (slug, members, keys, last request)
+  orgs add-member <org> <email> [--role member|admin|owner]
+                                          add an existing account to an organization, no invitation
+  keys <org>                              list an organization's API keys (org: slug or id)
   keys revoke <key-id>                    revoke an API key at once
-  usage [--days 30] [--csv]               requests, decisions and tokens per account and model`;
+  usage [--days 30] [--csv]               requests, decisions and tokens per organization and model`;
 
 type Row = Record<string, unknown>;
 
@@ -54,6 +69,7 @@ async function run(ctx: Ctx, argv: string[]) {
       days: { type: "string", default: "30" },
       csv: { type: "boolean", default: false },
       yes: { type: "boolean", default: false },
+      role: { type: "string", default: "member" },
     },
   });
   const [cmd, sub, arg] = args;
@@ -66,8 +82,14 @@ async function run(ctx: Ctx, argv: string[]) {
   }
   if (cmd === "users" && sub === "verify" && arg) return (await verifyUser(ctx, arg), console.log(`confirmed ${arg}`));
   if (cmd === "users" && sub === "delete" && arg) {
-    if (!opts.yes) throw new Error("deleting removes the account, its keys and usage; add --yes to confirm");
+    if (!opts.yes)
+      throw new Error("deleting removes the account and the organizations only it belongs to; add --yes to confirm");
     return (await deleteUser(ctx, arg), console.log(`deleted ${arg}`));
+  }
+  if (cmd === "orgs" && !sub) return table(await listOrgs(ctx));
+  if (cmd === "orgs" && sub === "add-member" && arg && args[3]) {
+    await addMember(ctx, arg, args[3], opts.role);
+    return console.log(`added ${args[3]} to ${arg} as ${opts.role}`);
   }
   if (cmd === "keys" && sub === "revoke" && arg) return (await revokeKey(ctx, arg), console.log(`revoked ${arg}`));
   if (cmd === "keys" && sub) return table(await listKeys(ctx, sub));

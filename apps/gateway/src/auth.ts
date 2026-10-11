@@ -2,7 +2,14 @@ import { apiKeys, type Db, eq } from "@basal/db";
 import { apiKeyCacheKey, hashApiKey, looksLikeApiKey } from "@basal/shared/keys";
 import type { Redis } from "ioredis";
 
-export type KeyInfo = { keyId: string; userId: string; rpmLimit: number; concurrencyLimit: number };
+/** An API key belongs to an organization; `userId` is the member who created it (null once they left). */
+export type KeyInfo = {
+  keyId: string;
+  organizationId: string;
+  userId: string | null;
+  rpmLimit: number;
+  concurrencyLimit: number;
+};
 
 const TTL_S = 60; // revocation also deletes the cache entry (web app); the TTL bounds staleness otherwise
 const MISS_TTL_S = 10; // unknown keys: avoid a database query per attempt
@@ -14,12 +21,15 @@ export async function resolveKey(db: Db, redis: Redis, header: string | undefine
   const cacheKey = apiKeyCacheKey(hash);
 
   const cached = await redis.get(cacheKey);
-  if (cached !== null) return cached === "" ? null : (JSON.parse(cached) as KeyInfo);
+  if (cached === "") return null;
+  const hit = cached === null ? null : (JSON.parse(cached) as Partial<KeyInfo>);
+  if (hit?.organizationId) return hit as KeyInfo; // entries cached before organizations are looked up again
 
   const [row] = await db
     .select({
       keyId: apiKeys.id,
-      userId: apiKeys.userId,
+      organizationId: apiKeys.organizationId,
+      userId: apiKeys.createdBy,
       rpmLimit: apiKeys.rpmLimit,
       concurrencyLimit: apiKeys.concurrencyLimit,
       revokedAt: apiKeys.revokedAt,
@@ -33,6 +43,7 @@ export async function resolveKey(db: Db, redis: Redis, header: string | undefine
   }
   const info: KeyInfo = {
     keyId: row.keyId,
+    organizationId: row.organizationId,
     userId: row.userId,
     rpmLimit: row.rpmLimit,
     concurrencyLimit: row.concurrencyLimit,

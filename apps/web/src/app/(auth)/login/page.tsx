@@ -42,6 +42,7 @@ export default async function LoginPage({ searchParams }: PageProps<"/login">) {
         oauth={<OAuthButtons providers={OAUTH_PROVIDERS} />}
         action={signIn}
         signupOpen={SIGNUP_OPEN}
+        next={typeof params.next === "string" ? params.next : undefined}
       />
     </>
   );

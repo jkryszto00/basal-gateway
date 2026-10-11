@@ -1,17 +1,18 @@
 // Integration test: real Postgres + Redis from docker compose (`bun run db:up && bun run db:migrate`), fake
 // inference server.
-import { apiKeys, createDb, eq, usageEvents, user } from "@basal/db";
+import { apiKeys, createDb, eq, ensurePersonalOrganization, organization, usageEvents, user } from "@basal/db";
 import { generateApiKey } from "@basal/shared/keys";
 import { Hono } from "hono";
 import { Redis } from "ioredis";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
-import { apiError, createApp, type UserLimits } from "./app";
+import { apiError, createApp, type OrgLimits } from "./app";
 import { UsageFlusher } from "./usage";
 import { createUpstreams } from "./upstream";
 
 const db = createDb(process.env.DATABASE_URL ?? "postgres://basal:basal@localhost:5432/basal");
 const redis = new Redis(process.env.REDIS_TEST_URL ?? "redis://localhost:6379/15");
 const userId = `test-${crypto.randomUUID()}`;
+let orgId: string;
 
 let fake: ReturnType<typeof Bun.serve>;
 let app: ReturnType<typeof createApp>;
@@ -24,7 +25,7 @@ let hooked: ReturnType<typeof createApp>; // with extension hooks
 let seenEvents: { model: string; inputTokens: number }[] = [];
 let refuseNext = false;
 
-const limits = (overrides: Partial<UserLimits> = {}): UserLimits => ({
+const limits = (overrides: Partial<OrgLimits> = {}): OrgLimits => ({
   rpm: 1_000,
   concurrency: 100,
   dailyRequests: 0,
@@ -42,7 +43,7 @@ async function newKey(opts: { rpmLimit?: number; concurrencyLimit?: number } = {
   const k = generateApiKey();
   const [row] = await db
     .insert(apiKeys)
-    .values({ userId, name: "test", hash: k.hash, prefix: k.prefix, ...opts })
+    .values({ organizationId: orgId, createdBy: userId, name: "test", hash: k.hash, prefix: k.prefix, ...opts })
     .returning({ id: apiKeys.id });
   return { key: k.key, id: row!.id };
 }
@@ -102,28 +103,28 @@ beforeAll(async () => {
     upstreams: createUpstreams({
       "basal-1.5": { url, token: "upstream-secret", maxInFlight: 1, timeoutMs: 5_000 },
     }),
-    userLimits: limits(),
+    orgLimits: limits(),
     defaultModel: "basal-1.5",
   });
   strict = createApp({
     db,
     redis,
     upstreams: createUpstreams({ "basal-1.5": { url, token: "upstream-secret", maxInFlight: 10, timeoutMs: 5_000 } }),
-    userLimits: limits({ rpm: 3, concurrency: 1 }),
+    orgLimits: limits({ rpm: 3, concurrency: 1 }),
     defaultModel: "basal-1.5",
   });
   daily = createApp({
     db,
     redis,
     upstreams: createUpstreams({ "basal-1.5": { url, token: "upstream-secret", maxInFlight: 10, timeoutMs: 5_000 } }),
-    userLimits: limits({ dailyRequests: 2 }),
+    orgLimits: limits({ dailyRequests: 2 }),
     defaultModel: "basal-1.5",
   });
   open = createApp({
     db,
     redis,
     upstreams: createUpstreams({ "basal-1.5": { url, token: "upstream-secret", maxInFlight: 10, timeoutMs: 5_000 } }),
-    userLimits: limits(),
+    orgLimits: limits(),
     defaultModel: "basal-1.5",
   });
   rs = createApp({
@@ -133,7 +134,7 @@ beforeAll(async () => {
       "basal-1.5": { url, path: "/v1/basal", model: "basal-1.5-max" }, // public name -> server model
       "basal-1.5-max": { url, path: "/v1/basal", model: "basal-1.5-max" },
     }),
-    userLimits: limits(),
+    orgLimits: limits(),
     defaultModel: "basal-1.5-max",
   });
   omni = createApp({
@@ -150,14 +151,14 @@ beforeAll(async () => {
         meta: { modalities: ["text", "audio"] },
       },
     }),
-    userLimits: limits(),
+    orgLimits: limits(),
     defaultModel: "basal-1.5",
   });
   hooked = createApp({
     db,
     redis,
     upstreams: createUpstreams({ "basal-1.5": { url, token: "upstream-secret" } }),
-    userLimits: limits(),
+    orgLimits: limits(),
     defaultModel: "basal-1.5",
     hooks: {
       // what a hosted build would do with prepaid credits
@@ -169,6 +170,7 @@ beforeAll(async () => {
     },
   });
   await db.insert(user).values({ id: userId, name: "Test", email: `${userId}@example.com` });
+  orgId = await ensurePersonalOrganization(db, { id: userId, name: "Test" });
 });
 
 beforeEach(async () => {
@@ -180,7 +182,8 @@ beforeEach(async () => {
 });
 
 afterAll(async () => {
-  await db.delete(user).where(eq(user.id, userId)); // cascades to keys, credits, usage
+  await db.delete(organization).where(eq(organization.id, orgId)); // cascades to keys and usage
+  await db.delete(user).where(eq(user.id, userId));
   await redis.flushdb();
   redis.disconnect();
   await fake.stop(true);
@@ -303,6 +306,7 @@ describe("POST /v1/systemone", () => {
     expect(await new UsageFlusher(db, redis).flush()).toBe(1);
     const [ev] = await db.select().from(usageEvents).where(eq(usageEvents.id, json.id));
     expect(ev).toMatchObject({
+      organizationId: orgId,
       userId,
       apiKeyId: keyId,
       model: "basal-1.5",
@@ -328,18 +332,18 @@ describe("POST /v1/systemone", () => {
     expect(Number(res.headers.get("retry-after"))).toBeGreaterThan(0);
   });
 
-  it("enforces requests per minute per account, over all its keys", async () => {
+  it("enforces requests per minute per organization, over all its keys", async () => {
     const a = await newKey();
     const b = await newKey();
     const statuses = [];
     for (const k of [a, b, a, b]) statuses.push((await post(k.key, body(), strict)).status);
     expect(statuses).toEqual([200, 200, 200, 429]); // each key is far below its own 60 rpm
     const res = await post(a.key, body(), strict);
-    expect(((await res.json()) as { error: { message: string } }).error.message).toContain("this account");
+    expect(((await res.json()) as { error: { message: string } }).error.message).toContain("this organization");
     expect(Number(res.headers.get("retry-after"))).toBeGreaterThan(0);
   });
 
-  it("enforces concurrency per account and frees the slots afterwards", async () => {
+  it("enforces concurrency per organization and frees the slots afterwards", async () => {
     upstreamDelayMs = 300;
     const a = await newKey();
     const b = await newKey();
@@ -347,10 +351,10 @@ describe("POST /v1/systemone", () => {
     expect([x.status, y.status].sort()).toEqual([200, 429]);
     expect(await redis.zcard(`cc:key:${a.id}`)).toBe(0);
     expect(await redis.zcard(`cc:key:${b.id}`)).toBe(0); // the refused key's slot was given back too
-    expect(await redis.zcard(`cc:user:${userId}`)).toBe(0);
+    expect(await redis.zcard(`cc:org:${orgId}`)).toBe(0);
   });
 
-  it("caps requests per account per day", async () => {
+  it("caps requests per organization per day", async () => {
     const a = await newKey();
     const b = await newKey();
     expect((await post(a.key, body(), daily)).status).toBe(200);
@@ -376,21 +380,34 @@ describe("POST /v1/systemone", () => {
     expect([x.status, y.status].sort()).toEqual([200, 503]);
   });
 
-  it("drops queued usage of a deleted account instead of blocking the queue", async () => {
+  it("drops queued usage of a deleted organization, and keeps a departed creator's usage", async () => {
     const other = `test-${crypto.randomUUID()}`;
     await db.insert(user).values({ id: other, name: "Gone", email: `${other}@example.com` });
+    const otherOrg = await ensurePersonalOrganization(db, { id: other, name: "Gone" });
     const k = generateApiKey();
-    await db.insert(apiKeys).values({ userId: other, name: "gone", hash: k.hash, prefix: k.prefix });
+    await db
+      .insert(apiKeys)
+      .values({ organizationId: otherOrg, createdBy: other, name: "gone", hash: k.hash, prefix: k.prefix });
     expect((await post(k.key, body())).status).toBe(200);
-    const { key } = await newKey();
-    const ok = await post(key, body());
-    expect(ok.status).toBe(200);
-    await db.delete(user).where(eq(user.id, other)); // account deleted while its usage is still queued
 
-    expect(await new UsageFlusher(db, redis).flush()).toBe(1); // only the live account's event
+    const leaver = `test-${crypto.randomUUID()}`; // created a key in our organization, then deleted their account
+    await db.insert(user).values({ id: leaver, name: "Leaver", email: `${leaver}@example.com` });
+    const lk = generateApiKey();
+    await db
+      .insert(apiKeys)
+      .values({ organizationId: orgId, createdBy: leaver, name: "leaver", hash: lk.hash, prefix: lk.prefix });
+    const kept = await post(lk.key, body());
+    expect(kept.status).toBe(200);
+
+    await db.delete(organization).where(eq(organization.id, otherOrg)); // deleted while its usage is still queued
+    await db.delete(user).where(eq(user.id, other));
+    await db.delete(user).where(eq(user.id, leaver));
+
+    expect(await new UsageFlusher(db, redis).flush()).toBe(1); // only the live organization's event
     expect(await redis.llen("usage:queue")).toBe(0);
-    const id = ((await ok.json()) as { id: string }).id;
-    expect(await db.select().from(usageEvents).where(eq(usageEvents.id, id))).toHaveLength(1);
+    const id = ((await kept.json()) as { id: string }).id;
+    const [ev] = await db.select().from(usageEvents).where(eq(usageEvents.id, id));
+    expect(ev).toMatchObject({ organizationId: orgId, userId: null });
   });
 
   it("stops accepting a revoked key once its cache entry is gone", async () => {

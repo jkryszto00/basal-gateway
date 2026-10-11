@@ -17,8 +17,8 @@ return 1`;
 
 export type RateResult = { ok: true } | { ok: false; retryAfterS: number };
 
-/** What a limit counts against: one API key, or every key of an account together. */
-export type Scope = `key:${string}` | `user:${string}`;
+/** What a limit counts against: one API key, or every key of an organization together. */
+export type Scope = `key:${string}` | `org:${string}`;
 
 export async function checkRate(redis: Redis, scope: Scope, rpm: number, now = Date.now()): Promise<RateResult> {
   const window = Math.floor(now / 60_000);
@@ -38,7 +38,7 @@ export async function releaseSlot(redis: Redis, scope: Scope, requestId: string)
   await redis.zrem(`cc:${scope}`, requestId);
 }
 
-// Requests per UTC day per account: checked and counted in one step, and only counted while below the limit, so a
+// Requests per UTC day per organization: checked and counted in one step, and only counted while below the limit, so a
 // refused request does not use up the day.
 const DAILY = `
 if tonumber(redis.call('GET', KEYS[1]) or '0') >= tonumber(ARGV[1]) then return 1 end
@@ -46,9 +46,15 @@ redis.call('INCR', KEYS[1])
 redis.call('EXPIRE', KEYS[1], ARGV[2])
 return 0`;
 
-export async function checkDaily(redis: Redis, userId: string, limit: number, now = Date.now()): Promise<RateResult> {
+export async function checkDaily(
+  redis: Redis,
+  organizationId: string,
+  limit: number,
+  now = Date.now(),
+): Promise<RateResult> {
   const day = new Date(now).toISOString().slice(0, 10);
-  if (Number(await redis.eval(DAILY, 1, `daily:user:${userId}:${day}`, limit, 2 * 86_400)) === 0) return { ok: true };
+  if (Number(await redis.eval(DAILY, 1, `daily:org:${organizationId}:${day}`, limit, 2 * 86_400)) === 0)
+    return { ok: true };
   const untilMidnightS = Math.ceil((Date.parse(`${day}T00:00:00Z`) + 86_400_000 - now) / 1000);
   return { ok: false, retryAfterS: Math.max(1, untilMidnightS) };
 }
