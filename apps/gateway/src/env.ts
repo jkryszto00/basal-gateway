@@ -43,6 +43,9 @@ const base = z.object({
   ORG_CONCURRENCY_LIMIT: z.coerce.number().int().positive().default(16),
   /** requests per UTC day per organization; 0 means no daily limit */
   ORG_DAILY_REQUESTS: z.coerce.number().int().nonnegative().default(0),
+  /** default monthly quota per organization (calendar month, UTC) unless the admin set one; 0 means none */
+  ORG_MONTHLY_REQUESTS: z.coerce.number().int().nonnegative().default(0),
+  ORG_MONTHLY_TOKENS: z.coerce.number().int().nonnegative().default(0),
   /** model used when a request names none; default: the first model in UPSTREAMS */
   DEFAULT_MODEL: z.string().min(1).optional(),
   /** {"basal-1.5": {"url": "...", "token": "..."}}: public model name -> basal-serve or basal-rs upstream */

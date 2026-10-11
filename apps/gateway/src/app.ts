@@ -11,6 +11,7 @@ import { z } from "zod";
 import { type KeyInfo, resolveKey } from "./auth";
 import { acquireSlot, checkDaily, checkRate, releaseSlot } from "./limits";
 import type { Upstream } from "./upstream";
+import { checkQuotas, recordQuotaUsage, secondsToNextMonth } from "./quota";
 import { recordUsage, type UsageEvent } from "./usage";
 
 /** Limits per organization, summed over all its API keys (10 keys x 60 rpm would otherwise allow 600 rpm). */
@@ -19,6 +20,9 @@ export type OrgLimits = {
   concurrency: number;
   /** requests per UTC day; 0 means no daily limit */
   dailyRequests: number;
+  /** default monthly quota of organizations without their own; 0 means none */
+  monthlyRequests: number;
+  monthlyTokens: number;
 };
 
 /** What a hook knows about the request it runs for. */
@@ -57,6 +61,7 @@ type ErrorCode =
   | "rate_limited"
   | "concurrency_limited"
   | "daily_limit_reached"
+  | "quota_exceeded"
   | "overloaded"
   | "upstream_error"
   | "upstream_timeout";
@@ -185,6 +190,27 @@ export function createApp({ db, redis, upstreams, orgLimits, defaultModel, hooks
       }
     }
 
+    const exceeded = await checkQuotas(db, redis, [
+      { scope: keyScope, quota: { requests: key.monthlyRequests, tokens: key.monthlyTokens }, of: "this API key" },
+      {
+        scope: orgScope,
+        quota: {
+          requests: key.orgMonthlyRequests ?? orgLimits.monthlyRequests,
+          tokens: key.orgMonthlyTokens ?? orgLimits.monthlyTokens,
+        },
+        of: "this organization",
+      },
+    ]);
+    if (exceeded) {
+      const res = fail(
+        "quota_exceeded",
+        `monthly quota of ${exceeded.limit} ${exceeded.unit} for ${exceeded.of} used up; it renews on the 1st (UTC)`,
+        429,
+      );
+      res.headers.set("retry-after", String(secondsToNextMonth()));
+      return res;
+    }
+
     if (!(await acquireSlot(redis, keyScope, key.concurrencyLimit, requestId))) {
       return fail("concurrency_limited", `limit of ${key.concurrencyLimit} concurrent requests for this API key`, 429);
     }
@@ -243,6 +269,7 @@ export function createApp({ db, redis, upstreams, orgLimits, defaultModel, hooks
         createdAt: new Date().toISOString(),
       };
       await recordUsage(redis, event);
+      await recordQuotaUsage(redis, [keyScope, orgScope], event.inputTokens);
       const extra = await hooks.onUsage?.(ctx, event);
       return Response.json(
         { id: requestId, ...out.data, model, usage: { ...usage, ...extra } },
