@@ -4,6 +4,7 @@ import { decisionRequest, decisionUsage } from "@basal/shared";
 import { type Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { secureHeaders } from "hono/secure-headers";
+import { version } from "../../../package.json";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import type { Redis } from "ioredis";
 import { z } from "zod";
@@ -88,7 +89,7 @@ export function createApp({ db, redis, upstreams, userLimits, defaultModel, hook
   // JSON API: no framing, no MIME sniffing, no referrer; HSTS is ignored by browsers on plain HTTP
   app.use("*", secureHeaders({ crossOriginResourcePolicy: false }));
 
-  app.get("/health", (c) => c.json({ status: "ok" }));
+  app.get("/health", (c) => c.json({ status: "ok", version }));
 
   // the largest body any model accepts, rejected before reading; each model's own limit is checked once it is known
   const maxBody = Math.max(...[...upstreams.values()].map((u) => u.maxBodyBytes));
