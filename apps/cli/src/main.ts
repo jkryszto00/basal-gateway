@@ -7,14 +7,18 @@ import {
   addUser,
   type Ctx,
   deleteUser,
+  disableUser,
+  enableUser,
+  inviteToSignUp,
   listKeys,
   listOrgs,
+  listSignupInvitations,
   listUsers,
   revokeKey,
   setOrgQuota,
   usageReport,
   verifyUser,
-} from "./commands";
+} from "@basal/admin";
 
 const HELP = `Usage: bun run admin <command>
 
@@ -23,6 +27,9 @@ const HELP = `Usage: bun run admin <command>
                                           create an account with a confirmed email and its personal organization
                                           (prints a generated password)
   users verify <email>                    mark an account's email as confirmed
+  users disable <email> | enable <email>  a disabled account cannot sign in (its organizations' keys keep working)
+  users invite <email>                    invite to sign up (SIGNUP_MODE=invite); prints the link to send
+  users invitations                       pending sign up invitations
   users delete <email> --yes              delete an account with the organizations only it belongs to
   orgs                                    list organizations (slug, members, keys, last request)
   orgs add-member <org> <email> [--role member|admin|owner]
@@ -86,6 +93,18 @@ async function run(ctx: Ctx, argv: string[]) {
     return;
   }
   if (cmd === "users" && sub === "verify" && arg) return (await verifyUser(ctx, arg), console.log(`confirmed ${arg}`));
+  if (cmd === "users" && (sub === "disable" || sub === "enable") && arg) {
+    await (sub === "disable" ? disableUser : enableUser)(ctx, arg);
+    return console.log(`${sub}d ${arg}`);
+  }
+  if (cmd === "users" && sub === "invite" && arg) {
+    const inv = await inviteToSignUp(ctx, arg);
+    const url = (process.env.BETTER_AUTH_URL ?? "http://localhost:3000").replace(/\/$/, "");
+    return console.log(
+      `invited ${inv.email} until ${inv.expiresAt.toISOString().slice(0, 10)}: ${url}/signup?email=${encodeURIComponent(inv.email)}`,
+    );
+  }
+  if (cmd === "users" && sub === "invitations") return table(await listSignupInvitations(ctx));
   if (cmd === "users" && sub === "delete" && arg) {
     if (!opts.yes)
       throw new Error("deleting removes the account and the organizations only it belongs to; add --yes to confirm");
