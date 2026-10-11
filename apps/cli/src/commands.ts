@@ -14,6 +14,7 @@ import {
   isPersonalOrganization,
   member,
   organization,
+  organizationQuotas,
   sql,
   usageEvents,
   user,
@@ -120,12 +121,15 @@ export async function listOrgs({ db }: Ctx) {
       name: organization.name,
       created: organization.createdAt,
       members: sql<number>`(select count(*)::int from member m where m.organization_id = "organization".id)`,
+      monthlyRequests: organizationQuotas.monthlyRequests,
+      monthlyTokens: organizationQuotas.monthlyTokens,
       keys: sql<number>`(select count(*)::int from api_keys k where k.organization_id = "organization".id and k.revoked_at is null)`,
       lastRequest: sql<
         string | null
       >`(select max(u.created_at) from usage_events u where u.organization_id = "organization".id)`,
     })
     .from(organization)
+    .leftJoin(organizationQuotas, eq(organizationQuotas.organizationId, organization.id))
     .orderBy(organization.createdAt);
   // raw sql`` values come back as text, unlike typed columns
   return rows.map((r) => ({
@@ -197,4 +201,24 @@ export async function usageReport({ db }: Ctx, days: number) {
     .groupBy(organization.slug, organization.name, usageEvents.model)
     .orderBy(organization.slug, usageEvents.model);
   return rows.map((r) => ({ ...r, inputTokens: Number(r.inputTokens) }));
+}
+
+/**
+ * Sets an organization's monthly quota (calendar month, UTC); 0 clears a value, which then falls back to
+ * ORG_MONTHLY_REQUESTS / ORG_MONTHLY_TOKENS. Clears the gateway's key cache so it applies at once.
+ */
+export async function setOrgQuota(ctx: Ctx, orgRef: string, quota: { requests?: number; tokens?: number }) {
+  const org = await orgByRef(ctx, orgRef);
+  for (const v of [quota.requests, quota.tokens])
+    if (v !== undefined && (!Number.isInteger(v) || v < 0)) throw new Error("quotas are whole numbers, 0 to clear");
+  const value = (v: number | undefined) => (v === undefined ? undefined : v || null);
+  const set = { monthlyRequests: value(quota.requests), monthlyTokens: value(quota.tokens), updatedAt: new Date() };
+  await ctx.db
+    .insert(organizationQuotas)
+    .values({ organizationId: org.id, ...set })
+    .onConflictDoUpdate({ target: organizationQuotas.organizationId, set });
+  const keys = await ctx.db.select({ hash: apiKeys.hash }).from(apiKeys).where(eq(apiKeys.organizationId, org.id));
+  if (keys.length) await ctx.redis.del(...keys.map((k) => apiKeyCacheKey(k.hash)));
+  const [row] = await ctx.db.select().from(organizationQuotas).where(eq(organizationQuotas.organizationId, org.id));
+  return { requests: row?.monthlyRequests ?? null, tokens: row?.monthlyTokens ?? null };
 }
