@@ -39,8 +39,9 @@ web (Next.js) ── sign up, API keys, usage, balance, settings
   deletion.
 - **Hardened defaults**: Content Security Policy and anti-framing headers on the dashboard (HSTS when served over
   HTTPS), secure headers on the API, Better Auth's HTTP endpoints limited to the emailed links and OAuth callbacks.
-- **Several models**: each public model name maps to an inference server (`UPSTREAMS`), clients
-  pick one with `"model"`, and the dashboard lists them and breaks usage down per model.
+- **Several models and servers**: each public model name maps to one or more inference servers (`UPSTREAMS`) with
+  overflow and failover between them; clients pick a model with `"model"`, and the dashboard lists them and breaks
+  usage down per model.
 
 ## Quick start
 
@@ -203,6 +204,22 @@ DEFAULT_MODEL=basal-1.5
 ```
 
 `GET /v1/models` lists the models and the default.
+
+### Failover and overflow
+
+A model can have several servers, in order of preference. A request goes to the first healthy server with room;
+when it is full (`maxInFlight`) the request overflows to the next, and when it fails (unreachable, timeout, 5xx or
+529) the gateway tries the next. Requests the model rejects (4xx) are not retried. After three failures in a row a
+server is tried last for 30 seconds. For example, an own GPU with a serverless one behind it for peaks and outages:
+
+```bash
+UPSTREAMS={"basal-1.5":[
+  {"url":"http://gpu.internal:8000","path":"/v1/basal","maxInFlight":32},
+  {"url":"https://<workspace>--basal-1-5-4-5b-fast-nocompile-basal-web.modal.run","token":"wk-….ws-…"}
+]}
+```
+
+The first server sets the model's request format (`api`) and body limit.
 
 ### New model families (omni, 2.0, ...)
 
