@@ -346,13 +346,15 @@ WEB_LOG=/tmp/web.log bun run e2e
 
 ## Roadmap
 
-- Organizations: keys, limits and usage per team or client
-- Monthly quotas per key and account (requests, tokens)
-- Admin page and sign up modes (open, invite only, closed)
-- Offline mode: every external service optional, for air-gapped installs
-- Usage export (CSV, API)
-- Upstream failover and overflow
-- Docker images for the gateway and dashboard: one `docker compose up` from clone to API
+Ideas for after 0.1, in no particular order; issues and pull requests are welcome.
+
+- OpenAPI description of the API
+- Prometheus metrics: requests, latency and the health of each inference server
+- Sign in with any OpenID Connect provider (Entra ID, Google Workspace, Keycloak)
+- Audit log of admin and organization changes
+- Key restrictions: allowed models, IP allowlist, expiry
+- Email alerts at 80% and 100% of a monthly quota
+- Helm chart for Kubernetes
 
 ## License
 
