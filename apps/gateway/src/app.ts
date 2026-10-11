@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { Db } from "@basal/db";
+import { aggregateUsage, type Db, parseUsageRange, USAGE_GROUPS, type UsageGroup } from "@basal/db";
 import { decisionRequest, decisionUsage } from "@basal/shared";
 import { type Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
@@ -118,6 +118,36 @@ export function createApp({ db, redis, upstreams, orgLimits, defaultModel, hooks
       })),
     }),
   );
+
+  // The key's organization's usage, for billing or reporting: GET /v1/usage?from=2026-10-01&to=2026-10-31&group_by=day,model
+  app.get("/v1/usage", async (c) => {
+    const key = await resolveKey(db, redis, c.req.header("authorization"));
+    if (!key) return fail("unauthorized", "missing or invalid API key", 401);
+    const rate = await checkRate(redis, `key:${key.keyId}`, key.rpmLimit);
+    if (!rate.ok) {
+      const res = fail("rate_limited", `limit of ${key.rpmLimit} requests per minute for this API key`, 429);
+      res.headers.set("retry-after", String(rate.retryAfterS));
+      return res;
+    }
+    const range = parseUsageRange(c.req.query("from"), c.req.query("to"));
+    if ("error" in range) return fail("invalid_request", range.error ?? "invalid period", 400);
+    const groupBy = (c.req.query("group_by") ?? "day").split(",").filter(Boolean);
+    const unknown = groupBy.filter((g) => !USAGE_GROUPS.includes(g as UsageGroup));
+    if (unknown.length)
+      return fail("invalid_request", `group_by takes ${USAGE_GROUPS.join(", ")}; got ${unknown.join(", ")}`, 400);
+    const rows = await aggregateUsage(db, { organizationId: key.organizationId, ...range }, groupBy as UsageGroup[]);
+    return c.json({
+      organization_id: key.organizationId,
+      from: range.from.toISOString(),
+      to: range.to.toISOString(),
+      group_by: groupBy,
+      data: rows.map(({ keyPrefix, inputTokens, ...r }) => ({
+        ...r,
+        ...(keyPrefix !== undefined ? { key_prefix: keyPrefix } : {}),
+        input_tokens: inputTokens,
+      })),
+    });
+  });
 
   const decide = async (c: Context) => {
     const t0 = performance.now();
