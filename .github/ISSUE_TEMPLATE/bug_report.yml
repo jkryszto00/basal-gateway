@@ -1,0 +1,27 @@
+name: Bug report
+description: Something does not work as documented
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead. Paste errors as text.
+    validations: { required: true }
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How to reproduce
+      description: The smallest steps or request that show the problem. Remove API keys and secrets.
+    validations: { required: true }
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Release, or the commit, and how you run it (Docker, bun run dev, ...)
+    validations: { required: true }
+  - type: input
+    id: inference
+    attributes:
+      label: Inference server
+      description: basal-rs / basal-serve / Modal / mock, and the model

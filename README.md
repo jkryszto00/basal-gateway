@@ -1,5 +1,7 @@
 # basal gateway
 
+[![CI](https://github.com/jkryszto00/basal-gateway/actions/workflows/ci.yml/badge.svg)](https://github.com/jkryszto00/basal-gateway/actions/workflows/ci.yml)
+
 A self-hosted API gateway for [basal](https://github.com/rkinas/basal) typed-decision models. Put it in front of your
 own inference server and get what an API needs to serve more than one app or client: API keys, rate and concurrency
 limits, usage metering and a dashboard.
@@ -272,6 +274,12 @@ running app started without `RESEND_API_KEY` so emails land in its log:
 cd apps/web && RESEND_API_KEY= bun run dev > /tmp/web.log 2>&1 &
 WEB_LOG=/tmp/web.log bun run e2e
 ```
+
+## Deployment, security, contributing
+
+- [Deployment](docs/deployment.md): checklist, reverse proxy with TLS, backups, upgrades, offline installs
+- [Security](SECURITY.md): reporting vulnerabilities
+- [Contributing](CONTRIBUTING.md) and the [changelog](CHANGELOG.md)
 
 ## Roadmap
 
