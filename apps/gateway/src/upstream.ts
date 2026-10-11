@@ -2,30 +2,25 @@ import type { z } from "zod";
 import { type UpstreamConfig, upstreamConfig } from "./env";
 
 export type UpstreamResult =
-  { kind: "ok"; status: number; body: unknown } | { kind: "timeout" } | { kind: "network"; error: string };
+  | { kind: "ok"; status: number; body: unknown }
+  | { kind: "timeout" }
+  | { kind: "network"; error: string }
+  /** every server of the model is at its maxInFlight */
+  | { kind: "busy" };
+
+/** Consecutive failures that take a server out of rotation, and for how long. */
+const FAILURES_TO_OPEN = 3;
+const OPEN_MS = 30_000;
 
 /** One inference server speaking the basal API (basal-serve or basal-rs: own GPU, Modal, RunPod, ...). */
-export class Upstream {
+export class Server {
   private inFlight = 0;
+  private failures = 0;
+  private openUntil = 0;
 
-  constructor(
-    readonly model: string,
-    private readonly cfg: UpstreamConfig,
-  ) {}
+  constructor(readonly cfg: UpstreamConfig) {}
 
-  get api() {
-    return this.cfg.api;
-  }
-
-  get maxBodyBytes() {
-    return this.cfg.maxBodyBytes;
-  }
-
-  get meta() {
-    return this.cfg.meta;
-  }
-
-  /** In-process backpressure: basal-serve queues without limit, so the gateway refuses past maxInFlight. */
+  /** In-process backpressure: basal-serve queues without limit, so the gateway stops at maxInFlight. */
   tryAcquire(): boolean {
     if (this.inFlight >= this.cfg.maxInFlight) return false;
     this.inFlight++;
@@ -36,8 +31,18 @@ export class Upstream {
     this.inFlight = Math.max(0, this.inFlight - 1);
   }
 
-  get load(): number {
-    return this.inFlight;
+  /** Circuit breaker: after FAILURES_TO_OPEN failures in a row the server is tried last for OPEN_MS. */
+  healthy(now = Date.now()): boolean {
+    return now >= this.openUntil;
+  }
+
+  recordSuccess(): void {
+    this.failures = 0;
+    this.openUntil = 0;
+  }
+
+  recordFailure(now = Date.now()): void {
+    if (++this.failures >= FAILURES_TO_OPEN) this.openUntil = now + OPEN_MS;
   }
 
   async decide(body: unknown): Promise<UpstreamResult> {
@@ -67,7 +72,68 @@ export class Upstream {
   }
 }
 
-/** Model name -> upstream; each config is validated and gets its defaults (path, maxInFlight, timeoutMs). */
-export function createUpstreams(config: Record<string, z.input<typeof upstreamConfig>>): Map<string, Upstream> {
-  return new Map(Object.entries(config).map(([model, cfg]) => [model, new Upstream(model, upstreamConfig.parse(cfg))]));
+/** Worth trying the next server: it did not answer, or failed on its side. A 4xx is the request's fault. */
+const failedOver = (r: UpstreamResult) =>
+  r.kind === "network" || r.kind === "timeout" || (r.kind === "ok" && r.status >= 500);
+
+/**
+ * A public model and its servers, in order of preference. A request goes to the first healthy server with room;
+ * a full one overflows to the next, a failing one (unreachable, timeout, 5xx or 529) fails over to the next.
+ * The first server sets the model's request format and body limit.
+ */
+export class Upstream {
+  constructor(
+    readonly model: string,
+    readonly servers: Server[],
+  ) {}
+
+  get api() {
+    return this.servers[0]!.cfg.api;
+  }
+
+  get maxBodyBytes() {
+    return this.servers[0]!.cfg.maxBodyBytes;
+  }
+
+  get meta() {
+    return this.servers[0]!.cfg.meta;
+  }
+
+  async decide(body: unknown): Promise<UpstreamResult> {
+    const now = Date.now();
+    const order = [...this.servers.filter((s) => s.healthy(now)), ...this.servers.filter((s) => !s.healthy(now))];
+    let last: UpstreamResult = { kind: "busy" };
+    for (const [i, server] of order.entries()) {
+      if (!server.tryAcquire()) continue; // full: overflow to the next
+      try {
+        const result = await server.decide(body);
+        if (!failedOver(result)) {
+          server.recordSuccess();
+          return result;
+        }
+        server.recordFailure();
+        last = result;
+        if (i < order.length - 1)
+          console.warn(`upstream ${this.model} #${this.servers.indexOf(server)} failed, trying the next`);
+      } finally {
+        server.release();
+      }
+    }
+    return last;
+  }
+}
+
+type ConfigInput = z.input<typeof upstreamConfig>;
+
+/** Model name -> its servers (one config, or a list in order of preference), validated with their defaults. */
+export function createUpstreams(config: Record<string, ConfigInput | ConfigInput[]>): Map<string, Upstream> {
+  return new Map(
+    Object.entries(config).map(([model, cfg]) => [
+      model,
+      new Upstream(
+        model,
+        (Array.isArray(cfg) ? cfg : [cfg]).map((c) => new Server(upstreamConfig.parse(c))),
+      ),
+    ]),
+  );
 }

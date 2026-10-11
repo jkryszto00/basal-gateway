@@ -45,6 +45,8 @@ const limits = (overrides: Partial<OrgLimits> = {}): OrgLimits => ({
 });
 let upstreamCalls = 0;
 let upstreamDelayMs = 0;
+let downCalls = 0;
+let fakeUrl = "";
 
 const body = (state = "Klient: nie mogę się zalogować.") => ({
   state,
@@ -109,8 +111,24 @@ beforeAll(async () => {
       usage: { input_tokens: 40, audio_seconds: 12.5 },
     });
   });
+  // failover: a server that is down for maintenance, and a backup that names itself in the answer
+  upstream.post("/v1/down", (c) => {
+    downCalls++;
+    return c.json({ error: "maintenance" }, 503);
+  });
+  upstream.post("/v1/backup", async (c) => {
+    const req = await c.req.json();
+    if (req.state === "bad") return c.json({ error: "rejected" }, 422);
+    if (upstreamDelayMs) await new Promise((r) => setTimeout(r, upstreamDelayMs));
+    return c.json({
+      model: "backup",
+      answers: { dept: { type: "choice", choice: "cards" } },
+      usage: { input_tokens: 10, output_tokens: 0, questions: 1, branches: 1, latency_ms: 1 },
+    });
+  });
   fake = Bun.serve({ fetch: upstream.fetch, port: 0 });
   const url = `http://127.0.0.1:${fake.port}`;
+  fakeUrl = url;
   app = createApp({
     db,
     redis,
@@ -198,6 +216,7 @@ beforeEach(async () => {
   await redis.flushdb();
   upstreamCalls = 0;
   upstreamDelayMs = 0;
+  downCalls = 0;
   seenEvents = [];
   refuseNext = false;
 });
@@ -525,6 +544,83 @@ describe("POST /v1/systemone", () => {
     expect((await app.request("/v1/usage")).status).toBe(401);
     await db.delete(organization).where(eq(organization.id, org));
     await db.delete(user).where(eq(user.id, owner));
+  });
+
+  it("fails over to the next server when one is down or unreachable, not on a rejected request", async () => {
+    const routed = (servers: unknown[]) =>
+      createApp({
+        db,
+        redis,
+        upstreams: createUpstreams({ "basal-1.5": servers as never }),
+        orgLimits: limits(),
+        defaultModel: "basal-1.5",
+      });
+    const { key } = await newKey();
+    const answeredBy = async (a: ReturnType<typeof createApp>, state?: string) => {
+      const res = await post(key, body(state), a);
+      return res.status === 200
+        ? ((await res.json()) as { answers: { dept: { choice: string } } }).answers.dept.choice
+        : res.status;
+    };
+    const down = routed([
+      { url: fakeUrl, path: "/v1/down" },
+      { url: fakeUrl, path: "/v1/backup" },
+    ]);
+    expect(await answeredBy(down)).toBe("cards"); // 503 from the first, answered by the second
+    const unreachable = routed([
+      { url: "http://127.0.0.1:9", path: "/v1/basal" },
+      { url: fakeUrl, path: "/v1/backup" },
+    ]);
+    expect(await answeredBy(unreachable)).toBe("cards");
+    const rejected = routed([
+      { url: fakeUrl, path: "/v1/backup" },
+      { url: fakeUrl, path: "/v1/down" },
+    ]);
+    expect(await answeredBy(rejected, "bad")).toBe(422); // the request's fault: not retried elsewhere
+    expect(downCalls).toBe(1);
+    const allDown = routed([{ url: fakeUrl, path: "/v1/down" }]);
+    expect(await answeredBy(allDown)).toBe(503); // the last answer is passed on
+  });
+
+  it("takes a failing server out of rotation for a while", async () => {
+    const { key } = await newKey();
+    const a = createApp({
+      db,
+      redis,
+      upstreams: createUpstreams({
+        "basal-1.5": [
+          { url: fakeUrl, path: "/v1/down" },
+          { url: fakeUrl, path: "/v1/backup" },
+        ],
+      }),
+      orgLimits: limits(),
+      defaultModel: "basal-1.5",
+    });
+    for (let i = 0; i < 5; i++) expect((await post(key, body(), a)).status).toBe(200);
+    expect(downCalls).toBe(3); // three failures in a row, then skipped
+  });
+
+  it("overflows to the next server when the first is full", async () => {
+    upstreamDelayMs = 300;
+    const { key } = await newKey();
+    const a = createApp({
+      db,
+      redis,
+      upstreams: createUpstreams({
+        "basal-1.5": [
+          { url: fakeUrl, token: "upstream-secret", maxInFlight: 1 },
+          { url: fakeUrl, path: "/v1/backup", maxInFlight: 1 },
+        ],
+      }),
+      orgLimits: limits(),
+      defaultModel: "basal-1.5",
+    });
+    const answers = await Promise.all([post(key, body(), a), post(key, body(), a), post(key, body(), a)]);
+    const choices = await Promise.all(
+      answers.map(async (r) => (r.status === 200 ? ((await r.json()) as { model: string }).model : r.status)),
+    );
+    expect(choices.sort()).toEqual([503, "basal-1.5", "basal-1.5"]); // both servers full: the third is refused
+    expect(upstreamCalls).toBe(1); // one went to the first server, one overflowed to the backup
   });
 
   it("enforces per-key concurrency and upstream capacity", async () => {
