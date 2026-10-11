@@ -256,6 +256,18 @@ if (process.env.GATEWAY_URL && process.env.E2E_INFERENCE !== "none") {
   if (second.status !== 429 || code !== "quota_exceeded")
     throw new Error(`monthly quota not enforced: ${second.status}`);
   step("decision through the gateway; the key's monthly quota of 1 request enforced");
+
+  await page.waitForTimeout(2_000); // the gateway writes usage to Postgres about once a second
+  const report = await (
+    await fetch(`${process.env.GATEWAY_URL}/v1/usage?group_by=key`, { headers: { authorization: `Bearer ${teamKey}` } })
+  ).json();
+  if (report.data?.[0]?.key !== "team-key" || report.data[0].requests !== 1)
+    throw new Error(`GET /v1/usage: ${JSON.stringify(report)}`);
+  const exported = await page.request.get(`${base}/dashboard/usage/export?period=this-month&detail=requests`);
+  const lines = (await exported.text()).trim().split("\n");
+  if (!lines[0].startsWith("time,model,key") || lines.length !== 2 || !lines[1].includes("team-key"))
+    throw new Error(`CSV export: ${lines.join(" | ")}`);
+  step("usage of the organization: GET /v1/usage and the dashboard's CSV export");
 }
 
 await page.goto(`${base}/dashboard/organization`);

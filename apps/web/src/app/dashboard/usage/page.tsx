@@ -1,4 +1,4 @@
-import { Card } from "@/components/ui";
+import { Button, Card, inputClass } from "@/components/ui";
 import { recentUsage, usageByModel } from "@/lib/data";
 
 export default async function UsagePage() {
@@ -9,6 +9,28 @@ export default async function UsagePage() {
         <h1 className="text-xl font-semibold">Usage</h1>
         <p className="text-sm text-muted">Successful requests; rejected and failed ones are not recorded.</p>
       </div>
+
+      <Card className="p-4">
+        <form action="/dashboard/usage/export" method="get" className="flex flex-wrap items-center gap-2 text-sm">
+          <span className="font-semibold">Export CSV</span>
+          <select name="period" defaultValue="this-month" aria-label="Period" className={`${inputClass} w-auto py-1`}>
+            <option value="this-month">This month</option>
+            <option value="last-month">Last month</option>
+            <option value="last-30-days">Last 30 days</option>
+          </select>
+          <select name="detail" defaultValue="daily" aria-label="Detail" className={`${inputClass} w-auto py-1`}>
+            <option value="daily">Daily totals per model and key</option>
+            <option value="requests">Every request</option>
+          </select>
+          <Button type="submit" variant="ghost" className="py-1">
+            Download
+          </Button>
+          <span className="text-xs text-muted">
+            Also over the API: <code className="font-mono">GET /v1/usage</code> with any of the organization&apos;s
+            keys.
+          </span>
+        </form>
+      </Card>
 
       <Card className="overflow-x-auto">
         <h2 className="px-4 pt-4 text-sm font-semibold">By model, last 30 days</h2>
