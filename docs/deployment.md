@@ -10,8 +10,10 @@ set, what to back up and how to upgrade.
 - [ ] `GATEWAY_PUBLIC_URL`: the API's public URL, shown to users in the dashboard.
 - [ ] `CLIENT_IP_HEADER`: the header your proxy sets to the visitor's IP (see below), and the dashboard reachable only
       through that proxy.
-- [ ] `SIGNUP_MODE` / `SIGNUP_ALLOWED_DOMAINS`: `closed` unless strangers should create accounts; create accounts with
-      `bun run admin users add` (or `docker compose exec gateway ...`, see below).
+- [ ] `ADMIN_EMAILS`: who gets the admin page.
+- [ ] `SIGNUP_MODE` / `SIGNUP_ALLOWED_DOMAINS`: `invite` or `closed` unless strangers should create accounts; admins
+      invite or create accounts on the admin page (or with `bun run admin`). `invite` relies on email confirmation to
+      prove the address, so keep `EMAIL_VERIFICATION` on with it.
 - [ ] Email: `SMTP_URL` or `RESEND_API_KEY`, and `EMAIL_FROM` at a domain with SPF and DKIM. Otherwise
       `EMAIL_VERIFICATION=false`.
 - [ ] Postgres and Redis not exposed to the internet (remove their `ports` from `docker-compose.yml` in production).
