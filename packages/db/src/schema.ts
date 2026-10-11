@@ -1,4 +1,4 @@
-import { boolean, index, integer, jsonb, pgTable, real, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { bigint, boolean, index, integer, jsonb, pgTable, real, text, timestamp, uuid } from "drizzle-orm/pg-core";
 
 // --- Better Auth core tables (user, session, account, verification) ---------------------------------------------
 
@@ -116,6 +116,19 @@ export const invitation = pgTable(
 
 // --- Provider tables ---------------------------------------------------------------------------------------------
 
+/**
+ * Monthly quota of an organization (calendar month, UTC), set by the instance's admin; null fields and organizations
+ * without a row fall back to ORG_MONTHLY_REQUESTS / ORG_MONTHLY_TOKENS.
+ */
+export const organizationQuotas = pgTable("organization_quotas", {
+  organizationId: text("organization_id")
+    .primaryKey()
+    .references(() => organization.id, { onDelete: "cascade" }),
+  monthlyRequests: integer("monthly_requests"),
+  monthlyTokens: bigint("monthly_tokens", { mode: "number" }),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const apiKeys = pgTable(
   "api_keys",
   {
@@ -132,6 +145,9 @@ export const apiKeys = pgTable(
     prefix: text("prefix").notNull(),
     rpmLimit: integer("rpm_limit").notNull().default(60),
     concurrencyLimit: integer("concurrency_limit").notNull().default(8),
+    /** per calendar month (UTC); null: no limit of its own, the organization's still applies */
+    monthlyRequests: integer("monthly_requests"),
+    monthlyTokens: bigint("monthly_tokens", { mode: "number" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
     revokedAt: timestamp("revoked_at", { withTimezone: true }),
