@@ -24,8 +24,11 @@ web (Next.js) ── sign up, API keys, usage, balance, settings
 ## Features
 
 - **API keys**: created in the dashboard, shown once, stored as a SHA-256 hash, revoked immediately.
-- **Limits**: requests per minute and concurrent requests per key and per account (over all its keys), optional
-  requests per day per account, request size limit, per-upstream capacity.
+- **Organizations**: API keys, limits and usage belong to an organization. Everyone has a personal one; shared ones
+  have owners, admins and members, invited by email, so a team or each client of an agency gets its own keys and
+  usage.
+- **Limits**: requests per minute and concurrent requests per key and per organization (over all its keys), optional
+  requests per day per organization, request size limit, per-upstream capacity.
 - **Usage**: every successful request is recorded (model, key, input tokens, questions, branches, latency) and shown
   per model and per request. Usage is measured in units, not money: what a decision costs depends on your hardware, so turn
   it into your own rates or internal charges; [hooks](#extending) let a build add pricing.
@@ -103,13 +106,16 @@ The response is basal's, plus a request `id`:
 closed instance:
 
 ```bash
-bun run admin users                                   # accounts, active keys, last request
-bun run admin users add ana@acme.com --name Ana       # confirmed account; prints a generated password once
+bun run admin users                                   # accounts and how many organizations they are in
+bun run admin users add ana@acme.com --name Ana       # confirmed account with its personal organization;
+                                                      # prints a generated password once
 bun run admin users verify ana@acme.com               # mark an email as confirmed
-bun run admin users delete ana@acme.com --yes         # with its keys and usage; keys stop working at once
-bun run admin keys ana@acme.com                       # an account's API keys
+bun run admin users delete ana@acme.com --yes         # with the organizations only it belongs to
+bun run admin keys <org>                              # an organization's API keys (slug or id)
 bun run admin keys revoke <key-id>                    # revoke a key at once
-bun run admin usage --days 30 --csv                   # requests, decisions, branches, tokens per account and model
+bun run admin orgs                                    # organizations: slug, members, keys, last request
+bun run admin orgs add-member <org> ana@acme.com --role admin   # add an account without an invitation
+bun run admin usage --days 30 --csv                   # requests, decisions, branches, tokens per organization and model
 ```
 
 ## Inference servers
@@ -189,8 +195,8 @@ All settings are environment variables, read from `.env` at the repository root 
 | `DEFAULT_MODEL` | first in `UPSTREAMS` | model of requests without `"model"` |
 | `GATEWAY_PORT` | `8787` | |
 | `API_KEY_PREFIX` | `bg_live_` | start of new API keys; existing keys keep working after a change |
-| `USER_RPM_LIMIT`, `USER_CONCURRENCY_LIMIT` | `120`, `16` | per account over all its keys; each key also has its own limits (60/min, 8) |
-| `USER_DAILY_REQUESTS` | `0` | requests per UTC day per account, `0` = unlimited |
+| `ORG_RPM_LIMIT`, `ORG_CONCURRENCY_LIMIT` | `120`, `16` | per organization over all its keys; each key also has its own limits (60/min, 8) |
+| `ORG_DAILY_REQUESTS` | `0` | requests per UTC day per organization, `0` = unlimited |
 | `APP_NAME` | `basal gateway` | shown in the dashboard and emails |
 | `SIGNUP_MODE` | `open` | `closed`: no new accounts (create them with the admin CLI); existing ones still sign in |
 | `SIGNUP_ALLOWED_DOMAINS` | | e.g. `acme.com,acme.pl`: only these email domains may sign up (email and OAuth) |
@@ -220,9 +226,9 @@ createApp({
   hooks: {
     // after authentication, validation and the per-minute limits, before the inference server
     beforeUpstream: async ({ key, model }) =>
-      (await balanceOf(key.userId)) <= 0 ? apiError("insufficient_credits", "balance is empty", 402) : undefined,
+      (await balanceOf(key.organizationId)) <= 0 ? apiError("insufficient_credits", "balance is empty", 402) : undefined,
     // after a successful decision, once its usage is queued; returned fields are added to the response's usage
-    onUsage: async ({ key }, event) => ({ cost: await charge(key.userId, event) }),
+    onUsage: async ({ key }, event) => ({ cost: await charge(key.organizationId, event) }),
   },
 });
 ```
