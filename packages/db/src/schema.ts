@@ -10,6 +10,8 @@ export const user = pgTable("user", {
   image: text("image"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  /** set by an instance admin: the account cannot sign in (its organizations' API keys keep working) */
+  disabledAt: timestamp("disabled_at", { withTimezone: true }),
 });
 
 export const session = pgTable(
@@ -115,6 +117,20 @@ export const invitation = pgTable(
 );
 
 // --- Provider tables ---------------------------------------------------------------------------------------------
+
+/** An instance admin's invitation to create an account, for SIGNUP_MODE=invite (organization invitations count too). */
+export const signupInvitations = pgTable(
+  "signup_invitations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    email: text("email").notNull(),
+    invitedBy: text("invited_by").references(() => user.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    usedAt: timestamp("used_at", { withTimezone: true }),
+  },
+  (t) => [index("signup_invitations_email_idx").on(t.email)],
+);
 
 /**
  * Monthly quota of an organization (calendar month, UTC), set by the instance's admin; null fields and organizations

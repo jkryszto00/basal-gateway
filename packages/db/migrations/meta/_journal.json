@@ -29,6 +29,13 @@
       "when": 1791719865546,
       "tag": "0003_monthly_quotas",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1791720236015,
+      "tag": "0004_admin",
+      "breakpoints": true
     }
   ]
 }
