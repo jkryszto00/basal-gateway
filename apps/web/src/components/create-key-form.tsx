@@ -9,11 +9,34 @@ export function CreateKeyForm() {
   const [state, action, pending] = useActionState(createKey, undefined);
   return (
     <div className="space-y-3">
-      <form action={action} className="flex gap-2">
-        <input name="name" placeholder="Key name, e.g. production" maxLength={64} required className={inputClass} />
-        <Button type="submit" disabled={pending} className="shrink-0">
-          Create key
-        </Button>
+      <form action={action} className="space-y-2">
+        <div className="flex gap-2">
+          <input name="name" placeholder="Key name, e.g. production" maxLength={64} required className={inputClass} />
+          <Button type="submit" disabled={pending} className="shrink-0">
+            Create key
+          </Button>
+        </div>
+        <details className="text-sm">
+          <summary className="text-muted">Monthly limits for this key (optional)</summary>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <input
+              name="monthlyRequests"
+              type="number"
+              min={1}
+              placeholder="Requests per month"
+              aria-label="Requests per month"
+              className={`${inputClass} w-52`}
+            />
+            <input
+              name="monthlyTokens"
+              type="number"
+              min={1}
+              placeholder="Input tokens per month"
+              aria-label="Input tokens per month"
+              className={`${inputClass} w-52`}
+            />
+          </div>
+        </details>
       </form>
       {state?.error && <p className="text-sm text-danger">{state.error}</p>}
       {state?.key && (

@@ -63,6 +63,8 @@ export default async function KeysPage() {
                 <td className="px-4 py-2 text-xs text-muted">{k.creator ?? "former member"}</td>
                 <td className="px-4 py-2 text-xs text-muted">
                   {k.rpmLimit}/min · {k.concurrencyLimit} parallel
+                  {k.monthlyRequests && ` · ${k.monthlyRequests.toLocaleString("en")} req/month`}
+                  {k.monthlyTokens && ` · ${k.monthlyTokens.toLocaleString("en")} tokens/month`}
                 </td>
                 <td className="px-4 py-2 font-mono text-xs text-muted">{date(k.createdAt)}</td>
                 <td className="px-4 py-2 font-mono text-xs text-muted">{date(k.lastUsedAt)}</td>

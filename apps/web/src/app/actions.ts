@@ -257,6 +257,17 @@ export async function createKey(_: CreateKeyState, form: FormData): Promise<Crea
   const { user, org } = await requireOrg();
   const name = z.string().trim().min(1).max(64).safeParse(form.get("name"));
   if (!name.success) return { error: "Name the key (1–64 characters)" };
+  // optional monthly quota of the key itself (the organization's applies on top); empty: none
+  const quota = z
+    .object({
+      monthlyRequests: z.coerce.number().int().positive().max(2_000_000_000).optional(),
+      monthlyTokens: z.coerce.number().int().positive().optional(),
+    })
+    .safeParse({
+      monthlyRequests: form.get("monthlyRequests") || undefined,
+      monthlyTokens: form.get("monthlyTokens") || undefined,
+    });
+  if (!quota.success) return { error: "Monthly limits are whole numbers above 0, or empty for none" };
 
   const [active] = await db
     .select({ n: count() })
@@ -265,9 +276,15 @@ export async function createKey(_: CreateKeyState, form: FormData): Promise<Crea
   if ((active?.n ?? 0) >= MAX_ACTIVE_KEYS) return { error: `At most ${MAX_ACTIVE_KEYS} active keys per organization` };
 
   const k = generateApiKey();
-  await db
-    .insert(apiKeys)
-    .values({ organizationId: org.id, createdBy: user.id, name: name.data, hash: k.hash, prefix: k.prefix });
+  await db.insert(apiKeys).values({
+    organizationId: org.id,
+    createdBy: user.id,
+    name: name.data,
+    hash: k.hash,
+    prefix: k.prefix,
+    monthlyRequests: quota.data.monthlyRequests ?? null,
+    monthlyTokens: quota.data.monthlyTokens ?? null,
+  });
   revalidatePath("/dashboard/keys");
   return { key: k.key, name: name.data }; // shown once, never stored
 }

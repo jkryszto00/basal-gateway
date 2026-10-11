@@ -2,18 +2,19 @@ import Link from "next/link";
 import { QuickStart } from "@/components/quick-start";
 import { Card, Stat } from "@/components/ui";
 import { requireOrg } from "@/lib/auth";
-import { myInvitations, usageSummary } from "@/lib/data";
+import { monthUsage, myInvitations, usageSummary } from "@/lib/data";
 import { listModels, type ModelInfo } from "@/lib/models";
 
 const API_URL = process.env.GATEWAY_PUBLIC_URL ?? "http://localhost:8787";
 
 export default async function Overview({ searchParams }: PageProps<"/dashboard">) {
-  const [{ welcome, joined }, { org }, usage, models, invitations] = await Promise.all([
+  const [{ welcome, joined }, { org }, usage, models, invitations, month] = await Promise.all([
     searchParams,
     requireOrg(),
     usageSummary(30),
     listModels(),
     myInvitations(),
+    monthUsage(),
   ]);
   const defaultModel = models?.find((m) => m.default)?.name;
 
@@ -49,6 +50,15 @@ export default async function Overview({ searchParams }: PageProps<"/dashboard">
         <p role="status" className="rounded-md border border-accent/40 bg-accent/5 p-3 text-sm">
           Your account is ready. Create an API key to send your first request.
         </p>
+      )}
+
+      {(month.requestQuota || month.tokenQuota) && (
+        <Card className="space-y-3 p-5">
+          <h2 className="font-semibold">This month</h2>
+          {month.requestQuota && <Meter label="Requests" used={month.requests} quota={month.requestQuota} />}
+          {month.tokenQuota && <Meter label="Input tokens" used={month.tokens} quota={month.tokenQuota} />}
+          <p className="text-xs text-muted">The monthly quota renews on the 1st (UTC); past it the API answers 429.</p>
+        </Card>
       )}
 
       <div className="grid gap-4 sm:grid-cols-3">
@@ -115,5 +125,25 @@ function Models({ models }: { models: ModelInfo[] | null }) {
         </ul>
       )}
     </Card>
+  );
+}
+
+function Meter({ label, used, quota }: { label: string; used: number; quota: number }) {
+  const share = Math.min(1, used / quota);
+  return (
+    <div className="space-y-1 text-sm">
+      <div className="flex justify-between">
+        <span>{label}</span>
+        <span className="tabular-nums text-muted">
+          {used.toLocaleString("en")} / {quota.toLocaleString("en")}
+        </span>
+      </div>
+      <div className="h-2 overflow-hidden rounded bg-line">
+        <div
+          className={`h-full ${share >= 1 ? "bg-danger" : share >= 0.8 ? "bg-yellow-500" : "bg-accent"}`}
+          style={{ width: `${share * 100}%` }}
+        />
+      </div>
+    </div>
   );
 }
