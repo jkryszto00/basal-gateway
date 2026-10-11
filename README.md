@@ -30,8 +30,8 @@ web (Next.js) ── sign up, API keys, usage, balance, settings
 - **Limits and quotas**: requests per minute and concurrent requests per key and per organization (over all its
   keys), optional requests per day, monthly quotas of requests and input tokens per key and per organization, request
   size limit, per-upstream capacity.
-- **Usage**: every successful request is recorded (model, key, input tokens, questions, branches, latency) and shown
-  per model and per request. Usage is measured in units, not money: what a decision costs depends on your hardware, so turn
+- **Usage**: every successful request is recorded (model, key, member, input tokens, questions, branches, latency),
+  shown per model and request, and exported as CSV or through `GET /v1/usage`. Usage is measured in units, not money: what a decision costs depends on your hardware, so turn
   it into your own rates or internal charges; [hooks](#extending) let a build add pricing.
 - **Accounts**: email and password with optional email confirmation and password reset (SMTP or Resend), optional
   GitHub and Google sign in, open, invite-only or closed sign up and allowed email domains, an admin page, breached-password check (Have I Been
@@ -134,6 +134,27 @@ quota` (or a default for all with `ORG_MONTHLY_REQUESTS` / `ORG_MONTHLY_TOKENS`)
 quota when they create it, e.g. one key per client. The dashboard shows the month's usage against the
 organization's quota. Counters live in Redis and are rebuilt from the usage in Postgres when missing; the check runs
 before a request and the count after it, so a quota can be overshot by the requests in flight when it runs out.
+
+## Usage reports
+
+Every member can download the organization's usage as CSV from the **Usage** page (daily totals per model and key,
+or every request). The same totals are available over the API with any of the organization's keys, e.g. to bill
+clients automatically:
+
+```bash
+curl "http://localhost:8787/v1/usage?from=2026-10-01&to=2026-10-31&group_by=day,model" \
+  -H "Authorization: Bearer $BASAL_KEY"
+```
+
+```json
+{
+  "organization_id": "…", "from": "2026-10-01T00:00:00.000Z", "to": "2026-11-01T00:00:00.000Z", "group_by": ["day", "model"],
+  "data": [{ "day": "2026-10-01", "model": "basal-1.5", "requests": 1200, "decisions": 2400, "branches": 2400, "input_tokens": 360000 }]
+}
+```
+
+`from` and `to` are UTC dates, both inclusive (default: this month so far, at most 366 days); `group_by` is any of
+`day`, `model`, `key` (default `day`; empty for one total). Usage reaches the report a few seconds after a request.
 
 ## Inference servers
 
