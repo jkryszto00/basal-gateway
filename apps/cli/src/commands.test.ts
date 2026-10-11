@@ -12,6 +12,7 @@ import {
   listOrgs,
   listUsers,
   revokeKey,
+  setOrgQuota,
   usageReport,
   verifyUser,
 } from "./commands";
@@ -121,6 +122,21 @@ describe("admin commands", () => {
       },
     ]);
     expect((await listOrgs(ctx)).find((o) => o.slug === teamSlug)?.lastRequest).toBeInstanceOf(Date);
+  });
+
+  it("sets and clears an organization's monthly quota, clearing its key cache", async () => {
+    const team = (await db.select().from(organization).where(eq(organization.slug, teamSlug)))[0]!;
+    const k = generateApiKey();
+    await db.insert(apiKeys).values({ organizationId: team.id, name: "q", hash: k.hash, prefix: k.prefix });
+    await redis.set(apiKeyCacheKey(k.hash), "{}");
+    expect(await setOrgQuota(ctx, teamSlug, { requests: 1000, tokens: 50_000 })).toEqual({
+      requests: 1000,
+      tokens: 50_000,
+    });
+    expect(await redis.exists(apiKeyCacheKey(k.hash))).toBe(0);
+    expect(await setOrgQuota(ctx, teamSlug, { requests: 0 })).toEqual({ requests: null, tokens: 50_000 }); // 0 clears
+    expect((await listOrgs(ctx)).find((o) => o.slug === teamSlug)).toMatchObject({ monthlyTokens: 50_000 });
+    await expect(setOrgQuota(ctx, teamSlug, { tokens: -1 })).rejects.toThrow("whole numbers");
   });
 
   it("refuses to delete the only owner of a shared organization, then deletes with personal organization", async () => {

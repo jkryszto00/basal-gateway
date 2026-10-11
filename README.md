@@ -27,8 +27,9 @@ web (Next.js) ── sign up, API keys, usage, balance, settings
 - **Organizations**: API keys, limits and usage belong to an organization. Everyone has a personal one; shared ones
   have owners, admins and members, invited by email, so a team or each client of an agency gets its own keys and
   usage.
-- **Limits**: requests per minute and concurrent requests per key and per organization (over all its keys), optional
-  requests per day per organization, request size limit, per-upstream capacity.
+- **Limits and quotas**: requests per minute and concurrent requests per key and per organization (over all its
+  keys), optional requests per day, monthly quotas of requests and input tokens per key and per organization, request
+  size limit, per-upstream capacity.
 - **Usage**: every successful request is recorded (model, key, input tokens, questions, branches, latency) and shown
   per model and per request. Usage is measured in units, not money: what a decision costs depends on your hardware, so turn
   it into your own rates or internal charges; [hooks](#extending) let a build add pricing.
@@ -115,8 +116,18 @@ bun run admin keys <org>                              # an organization's API ke
 bun run admin keys revoke <key-id>                    # revoke a key at once
 bun run admin orgs                                    # organizations: slug, members, keys, last request
 bun run admin orgs add-member <org> ana@acme.com --role admin   # add an account without an invitation
+bun run admin orgs quota <org> --requests 100000 --tokens 50000000   # monthly quota; 0 clears
 bun run admin usage --days 30 --csv                   # requests, decisions, branches, tokens per organization and model
 ```
+
+## Monthly quotas
+
+A quota caps an organization's or a key's successful requests and input tokens per calendar month (UTC); past it
+the API answers 429 `quota_exceeded` until the 1st. The admin sets an organization's quota with `bun run admin orgs
+quota` (or a default for all with `ORG_MONTHLY_REQUESTS` / `ORG_MONTHLY_TOKENS`); members give a key its own, lower
+quota when they create it, e.g. one key per client. The dashboard shows the month's usage against the
+organization's quota. Counters live in Redis and are rebuilt from the usage in Postgres when missing; the check runs
+before a request and the count after it, so a quota can be overshot by the requests in flight when it runs out.
 
 ## Inference servers
 
@@ -197,6 +208,7 @@ All settings are environment variables, read from `.env` at the repository root 
 | `API_KEY_PREFIX` | `bg_live_` | start of new API keys; existing keys keep working after a change |
 | `ORG_RPM_LIMIT`, `ORG_CONCURRENCY_LIMIT` | `120`, `16` | per organization over all its keys; each key also has its own limits (60/min, 8) |
 | `ORG_DAILY_REQUESTS` | `0` | requests per UTC day per organization, `0` = unlimited |
+| `ORG_MONTHLY_REQUESTS`, `ORG_MONTHLY_TOKENS` | `0`, `0` | default monthly quota (UTC month) of organizations without their own, `0` = none |
 | `APP_NAME` | `basal gateway` | shown in the dashboard and emails |
 | `SIGNUP_MODE` | `open` | `closed`: no new accounts (create them with the admin CLI); existing ones still sign in |
 | `SIGNUP_ALLOWED_DOMAINS` | | e.g. `acme.com,acme.pl`: only these email domains may sign up (email and OAuth) |
@@ -244,7 +256,7 @@ Errors are `{"error": {"code", "message"}}`:
 | 404 | `unknown_model` | the message lists the available models |
 | 413 | `payload_too_large` | body over 256 KiB |
 | 422 | `invalid_request` | does not match the schema, or the model rejected it |
-| 429 | `rate_limited`, `concurrency_limited`, `daily_limit_reached` | with `retry-after` |
+| 429 | `rate_limited`, `concurrency_limited`, `daily_limit_reached`, `quota_exceeded` | with `retry-after` |
 | 503 | `overloaded` | the inference server is at `maxInFlight` |
 | 502, 504 | `upstream_error`, `upstream_timeout` | |
 

@@ -11,6 +11,7 @@ import {
   isNull,
   member,
   organization,
+  organizationQuotas,
   sql,
   usageEvents,
   user as users,
@@ -32,6 +33,8 @@ export async function listKeys() {
       prefix: apiKeys.prefix,
       rpmLimit: apiKeys.rpmLimit,
       concurrencyLimit: apiKeys.concurrencyLimit,
+      monthlyRequests: apiKeys.monthlyRequests,
+      monthlyTokens: apiKeys.monthlyTokens,
       createdAt: apiKeys.createdAt,
       lastUsedAt: apiKeys.lastUsedAt,
     })
@@ -157,4 +160,30 @@ export async function myInvitations() {
         gt(invitation.expiresAt, new Date()),
       ),
     );
+}
+
+/** This calendar month's (UTC) requests and input tokens of the active organization, and its quota. */
+export async function monthUsage() {
+  const { org } = await requireOrg();
+  const now = new Date();
+  const since = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  const [[used], [quota]] = await Promise.all([
+    db
+      .select({
+        requests: sql<number>`count(*)::int`,
+        tokens: sql<string>`coalesce(sum(${usageEvents.inputTokens}), 0)`,
+      })
+      .from(usageEvents)
+      .where(and(eq(usageEvents.organizationId, org.id), gte(usageEvents.createdAt, since))),
+    db.select().from(organizationQuotas).where(eq(organizationQuotas.organizationId, org.id)),
+  ]);
+  // the gateway reads the same defaults (one .env for every app)
+  const limit = (own: number | null | undefined, fallback: string | undefined) =>
+    own ?? (Number(fallback ?? 0) || null);
+  return {
+    requests: Number(used?.requests ?? 0),
+    tokens: Number(used?.tokens ?? 0),
+    requestQuota: limit(quota?.monthlyRequests, process.env.ORG_MONTHLY_REQUESTS),
+    tokenQuota: limit(quota?.monthlyTokens, process.env.ORG_MONTHLY_TOKENS),
+  };
 }

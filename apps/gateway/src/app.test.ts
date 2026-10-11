@@ -1,6 +1,15 @@
 // Integration test: real Postgres + Redis from docker compose (`bun run db:up && bun run db:migrate`), fake
 // inference server.
-import { apiKeys, createDb, eq, ensurePersonalOrganization, organization, usageEvents, user } from "@basal/db";
+import {
+  apiKeys,
+  createDb,
+  eq,
+  ensurePersonalOrganization,
+  organization,
+  organizationQuotas,
+  usageEvents,
+  user,
+} from "@basal/db";
 import { generateApiKey } from "@basal/shared/keys";
 import { Hono } from "hono";
 import { Redis } from "ioredis";
@@ -22,6 +31,7 @@ let open: ReturnType<typeof createApp>; // credits not required
 let rs: ReturnType<typeof createApp>; // basal-rs style upstream
 let omni: ReturnType<typeof createApp>; // passthrough model next to a basal one
 let hooked: ReturnType<typeof createApp>; // with extension hooks
+let monthly: ReturnType<typeof createApp>; // default monthly quota of 2 requests per organization
 let seenEvents: { model: string; inputTokens: number }[] = [];
 let refuseNext = false;
 
@@ -29,6 +39,8 @@ const limits = (overrides: Partial<OrgLimits> = {}): OrgLimits => ({
   rpm: 1_000,
   concurrency: 100,
   dailyRequests: 0,
+  monthlyRequests: 0,
+  monthlyTokens: 0,
   ...overrides,
 });
 let upstreamCalls = 0;
@@ -39,7 +51,9 @@ const body = (state = "Klient: nie mogę się zalogować.") => ({
   questions: { dept: { type: "choice", instructions: "Dział?", criteria: { cards: "Karty", online: "Bankowość" } } },
 });
 
-async function newKey(opts: { rpmLimit?: number; concurrencyLimit?: number } = {}) {
+async function newKey(
+  opts: { rpmLimit?: number; concurrencyLimit?: number; monthlyRequests?: number; monthlyTokens?: number } = {},
+) {
   const k = generateApiKey();
   const [row] = await db
     .insert(apiKeys)
@@ -152,6 +166,13 @@ beforeAll(async () => {
       },
     }),
     orgLimits: limits(),
+    defaultModel: "basal-1.5",
+  });
+  monthly = createApp({
+    db,
+    redis,
+    upstreams: createUpstreams({ "basal-1.5": { url, token: "upstream-secret", maxInFlight: 10 } }),
+    orgLimits: limits({ monthlyRequests: 2 }),
     defaultModel: "basal-1.5",
   });
   hooked = createApp({
@@ -366,6 +387,57 @@ describe("POST /v1/systemone", () => {
     expect(err.message).toContain("2 requests per day");
     expect(Number(res.headers.get("retry-after"))).toBeGreaterThan(0);
     expect((await post(a.key, body())).status).toBe(200); // no daily limit configured
+  });
+
+  it("enforces a key's monthly quota of requests, counting successful requests only", async () => {
+    const { key } = await newKey({ monthlyRequests: 2 });
+    expect((await post(key, body("bad"))).status).toBe(422); // rejected by the model: not counted
+    expect((await post(key, body())).status).toBe(200);
+    expect((await post(key, body())).status).toBe(200);
+    const res = await post(key, body());
+    expect(res.status).toBe(429);
+    const err = ((await res.json()) as { error: { code: string; message: string } }).error;
+    expect(err).toMatchObject({ code: "quota_exceeded" });
+    expect(err.message).toContain("2 requests for this API key");
+    expect(Number(res.headers.get("retry-after"))).toBeGreaterThan(0);
+  });
+
+  it("enforces a key's monthly token quota, overshooting by at most the requests in flight", async () => {
+    const { key } = await newKey({ monthlyTokens: 500 }); // the fake server reports 300 input tokens
+    expect((await post(key, body())).status).toBe(200); // 0 used
+    expect((await post(key, body())).status).toBe(200); // 300 used
+    const res = await post(key, body()); // 600 used
+    expect(((await res.json()) as { error: { message: string } }).error.message).toContain("500 input tokens");
+  });
+
+  it("seeds the month's counters from Postgres when Redis has none", async () => {
+    const { key, id } = await newKey({ monthlyRequests: 3 });
+    const past = { organizationId: orgId, apiKeyId: id, model: "basal-1.5", inputTokens: 1, questions: 1, branches: 1 };
+    await db
+      .insert(usageEvents)
+      .values([1, 2, 3].map(() => ({ ...past, id: crypto.randomUUID(), upstreamLatencyMs: 1, totalLatencyMs: 1 })));
+    expect((await post(key, body())).status).toBe(429); // used up before Redis knew
+  });
+
+  it("applies the default organization quota unless the organization has its own", async () => {
+    const owner = `test-${crypto.randomUUID()}`; // a fresh organization: no usage this month yet
+    await db.insert(user).values({ id: owner, name: "Quota", email: `${owner}@example.com` });
+    const org = await ensurePersonalOrganization(db, { id: owner, name: "Quota" });
+    const k = generateApiKey();
+    await db
+      .insert(apiKeys)
+      .values({ organizationId: org, createdBy: owner, name: "q", hash: k.hash, prefix: k.prefix });
+
+    expect((await post(k.key, body(), monthly)).status).toBe(200);
+    expect((await post(k.key, body(), monthly)).status).toBe(200);
+    const res = await post(k.key, body(), monthly);
+    expect(((await res.json()) as { error: { message: string } }).error.message).toContain("this organization");
+
+    await db.insert(organizationQuotas).values({ organizationId: org, monthlyRequests: 100 });
+    await redis.del(`apikey:${k.hash}`); // key cache: the admin's change applies within a minute, at once when cleared
+    expect((await post(k.key, body(), monthly)).status).toBe(200);
+    await db.delete(organization).where(eq(organization.id, org));
+    await db.delete(user).where(eq(user.id, owner));
   });
 
   it("enforces per-key concurrency and upstream capacity", async () => {

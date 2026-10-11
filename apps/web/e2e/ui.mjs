@@ -231,9 +231,29 @@ if (!(await page.locator("h1").textContent()).includes("E2E Team")) throw new Er
 await page.goto(`${base}/dashboard/keys`);
 if (!(await page.getByText("No keys yet.").count())) throw new Error("a new organization shares keys");
 await page.fill('input[name="name"]', "team-key");
+await page.click("text=Monthly limits for this key (optional)");
+await page.fill('input[name="monthlyRequests"]', "1");
 await page.click("text=Create key");
 await page.locator("code", { hasText: KEY_PREFIX }).waitFor();
+const teamKey = (await page.locator("code", { hasText: KEY_PREFIX }).textContent()).trim();
 step("organization created and active, with its own keys");
+
+if (process.env.GATEWAY_URL && process.env.E2E_INFERENCE !== "none") {
+  // needs an inference server behind the gateway, e.g. `bun run mock`
+  const decide = () =>
+    fetch(`${process.env.GATEWAY_URL}/v1/systemone`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${teamKey}`, "content-type": "application/json" },
+      body: JSON.stringify({ state: "x", questions: { q: { type: "choice", criteria: ["a", "b"] } } }),
+    });
+  const first = await decide();
+  if (first.status !== 200) throw new Error(`decision through the gateway: ${first.status} ${await first.text()}`);
+  const second = await decide();
+  const code = (await second.json()).error?.code;
+  if (second.status !== 429 || code !== "quota_exceeded")
+    throw new Error(`monthly quota not enforced: ${second.status}`);
+  step("decision through the gateway; the key's monthly quota of 1 request enforced");
+}
 
 await page.goto(`${base}/dashboard/organization`);
 await page.fill('input[type="email"]', teammate);

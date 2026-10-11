@@ -11,6 +11,7 @@ import {
   listOrgs,
   listUsers,
   revokeKey,
+  setOrgQuota,
   usageReport,
   verifyUser,
 } from "./commands";
@@ -26,6 +27,8 @@ const HELP = `Usage: bun run admin <command>
   orgs                                    list organizations (slug, members, keys, last request)
   orgs add-member <org> <email> [--role member|admin|owner]
                                           add an existing account to an organization, no invitation
+  orgs quota <org> [--requests N] [--tokens N]
+                                          monthly quota (UTC month) of requests / input tokens; 0 clears
   keys <org>                              list an organization's API keys (org: slug or id)
   keys revoke <key-id>                    revoke an API key at once
   usage [--days 30] [--csv]               requests, decisions and tokens per organization and model`;
@@ -70,6 +73,8 @@ async function run(ctx: Ctx, argv: string[]) {
       csv: { type: "boolean", default: false },
       yes: { type: "boolean", default: false },
       role: { type: "string", default: "member" },
+      requests: { type: "string" },
+      tokens: { type: "string" },
     },
   });
   const [cmd, sub, arg] = args;
@@ -90,6 +95,11 @@ async function run(ctx: Ctx, argv: string[]) {
   if (cmd === "orgs" && sub === "add-member" && arg && args[3]) {
     await addMember(ctx, arg, args[3], opts.role);
     return console.log(`added ${args[3]} to ${arg} as ${opts.role}`);
+  }
+  if (cmd === "orgs" && sub === "quota" && arg) {
+    const num = (v: string | undefined) => (v === undefined ? undefined : Number(v));
+    const q = await setOrgQuota(ctx, arg, { requests: num(opts.requests), tokens: num(opts.tokens) });
+    return console.log(`${arg}: ${q.requests ?? "default"} requests, ${q.tokens ?? "default"} input tokens per month`);
   }
   if (cmd === "keys" && sub === "revoke" && arg) return (await revokeKey(ctx, arg), console.log(`revoked ${arg}`));
   if (cmd === "keys" && sub) return table(await listKeys(ctx, sub));

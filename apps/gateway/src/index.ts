@@ -16,6 +16,8 @@ const orgLimits = {
   rpm: env.ORG_RPM_LIMIT,
   concurrency: env.ORG_CONCURRENCY_LIMIT,
   dailyRequests: env.ORG_DAILY_REQUESTS,
+  monthlyRequests: env.ORG_MONTHLY_REQUESTS,
+  monthlyTokens: env.ORG_MONTHLY_TOKENS,
 };
 const app = createApp({
   db,
